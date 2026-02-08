@@ -42,6 +42,7 @@ See `schema.sql`.
   - Manual run (`workflow_dispatch`)
 - Registry: `ghcr.io`
 - Image: `ghcr.io/<owner>/<repo>`
+  - Note: workflow normalizes `owner/repo` to lowercase for GHCR compatibility.
 - Tags:
   - `main` branch tag
   - Git tag
