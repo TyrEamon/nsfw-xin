@@ -133,6 +133,16 @@
             height: 18px;
             stroke: currentColor;
         }
+        .admin-link {
+            text-decoration: none;
+            padding: 8px 12px;
+            gap: 6px;
+        }
+        .admin-link span {
+            font-size: 0.86rem;
+            letter-spacing: 0.3px;
+            line-height: 1;
+        }
 
         .cols-control {
             position: relative;
@@ -354,6 +364,13 @@
                         </div>
                     </div>
                 </div>
+                <a class="icon-btn admin-link" href="https://uplode.mtcacg.top" aria-label="管理员后台">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2.5l7.5 3v6.7c0 4.3-3 7.7-7.5 9.3-4.5-1.6-7.5-5-7.5-9.3V5.5l7.5-3z"/>
+                        <path d="M9.2 12.3l1.8 1.8 3.8-3.8"/>
+                    </svg>
+                    <span>Admin</span>
+                </a>
                 <button class="icon-btn" id="theme-toggle" aria-label="切换主题"></button>
             </div>
         </div>

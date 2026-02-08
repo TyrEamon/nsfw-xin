@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -47,8 +48,26 @@ func main() {
 		}
 		return len(update.Message.Photo) > 0 || update.Message.Document != nil
 	}, func(ctx context.Context, b *bot.Bot, update *models.Update) {
-		if err := application.HandleTGMessage(ctx, update.Message); err != nil {
+		result, err := application.HandleTGMessage(ctx, update.Message)
+		if err != nil {
 			log.Printf("tg handle error: %v", err)
+			if update.Message != nil && update.Message.Chat.ID != cfg.ChannelID {
+				_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+					ChatID: update.Message.Chat.ID,
+					Text:   fmt.Sprintf("笨蛋，这次处理失败了喵~\n错误：%v", err),
+				})
+			}
+			return
+		}
+		if result != nil && update.Message != nil && update.Message.Chat.ID != cfg.ChannelID {
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID: update.Message.Chat.ID,
+				Text: fmt.Sprintf(
+					"哼，才不是特意帮你处理的喵~\n转发和录入都完成了。\n标题：%s\nID：%s",
+					result.Title,
+					result.ID,
+				),
+			})
 		}
 	})
 
