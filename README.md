@@ -33,3 +33,22 @@ go run ./cmd/server
 
 ## D1 Schema
 See `schema.sql`.
+
+## GitHub Image Workflow
+- Workflow file: `.github/workflows/docker-image.yml`
+- Trigger:
+  - Push to `main`
+  - Push tag like `v1.0.0`
+  - Manual run (`workflow_dispatch`)
+- Registry: `ghcr.io`
+- Image: `ghcr.io/<owner>/<repo>`
+- Tags:
+  - `main` branch tag
+  - Git tag
+  - Commit SHA
+  - `latest` (default branch only)
+
+## GitHub Settings
+- In repository settings, keep Actions enabled.
+- If your org restricts package publish, allow this repo to publish to GHCR.
+- `GITHUB_TOKEN` is used automatically by the workflow for GHCR push.
