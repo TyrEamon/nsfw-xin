@@ -1,0 +1,250 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"strings"
+	"time"
+
+	"pixiv-tg-gallery/internal/config"
+	"pixiv-tg-gallery/internal/database"
+	"pixiv-tg-gallery/internal/pixiv"
+	"pixiv-tg-gallery/internal/telegram"
+
+	"github.com/go-telegram/bot/models"
+)
+
+type App struct {
+	Cfg   *config.Config
+	DB    *database.Client
+	TG    *telegram.Client
+	Pixiv *pixiv.Client
+}
+
+func New(cfg *config.Config, db *database.Client, tg *telegram.Client, pv *pixiv.Client) *App {
+	return &App{Cfg: cfg, DB: db, TG: tg, Pixiv: pv}
+}
+
+func (a *App) HandleUpload(ctx context.Context, data []byte) error {
+	title := "upload"
+	artistName := "Arts"
+	artistID := "none"
+	sourceURL := "none"
+
+	previewID, originID, previewMsgID, originMsgID, width, height, err := a.TG.SendPreviewAndOrigin(ctx, data, title)
+	if err != nil {
+		return err
+	}
+
+	msgID := chooseMsgID(previewMsgID, originMsgID)
+	imgID := fmt.Sprintf("upload_%d", msgID)
+
+	img := database.Image{
+		ID:         imgID,
+		PreviewID:  previewID,
+		OriginID:   originID,
+		Title:      title,
+		ArtistName: artistName,
+		ArtistID:   artistID,
+		SourceURL:  sourceURL,
+		Source:     "upload",
+		Width:      width,
+		Height:     height,
+		CreatedAt:  time.Now().Unix(),
+	}
+
+	return a.DB.InsertImage(ctx, img)
+}
+
+func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) error {
+	if msg == nil {
+		return nil
+	}
+	if msg.Chat.ID == a.Cfg.ChannelID {
+		return nil
+	}
+
+	title := strings.TrimSpace(msg.Caption)
+	if title == "" {
+		title = strings.TrimSpace(msg.Text)
+	}
+	if title == "" {
+		title = "TG"
+	}
+
+	var fileID string
+	if msg.Document != nil {
+		fileID = msg.Document.FileID
+	} else if len(msg.Photo) > 0 {
+		fileID = msg.Photo[len(msg.Photo)-1].FileID
+	}
+
+	if fileID == "" {
+		return nil
+	}
+
+	data, _, err := a.TG.DownloadFile(ctx, fileID)
+	if err != nil {
+		return err
+	}
+
+	previewID, originID, previewMsgID, originMsgID, width, height, err := a.TG.SendPreviewAndOrigin(ctx, data, title)
+	if err != nil {
+		return err
+	}
+
+	msgID := chooseMsgID(previewMsgID, originMsgID)
+	sourceURL := channelMessageLink(a.Cfg.ChannelID, msgID)
+
+	img := database.Image{
+		ID:         fmt.Sprintf("tg_%d", msgID),
+		PreviewID:  previewID,
+		OriginID:   originID,
+		Title:      title,
+		ArtistName: "Arts",
+		ArtistID:   "none",
+		SourceURL:  sourceURL,
+		Source:     "tg",
+		Width:      width,
+		Height:     height,
+		CreatedAt:  time.Now().Unix(),
+	}
+
+	return a.DB.InsertImage(ctx, img)
+}
+
+func (a *App) StartPixivCrawler(ctx context.Context) {
+	if a.Pixiv == nil || a.Cfg.PixivPHPSESSID == "" || a.Cfg.PixivUserID == "" {
+		log.Println("Pixiv crawler disabled (missing PIXIV_PHPSESSID or PIXIV_USER_ID)")
+		return
+	}
+
+	go func() {
+		a.crawlPixivOnce(ctx)
+		ticker := time.NewTicker(time.Duration(a.Cfg.PixivIntervalMinutes) * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				a.crawlPixivOnce(ctx)
+			}
+		}
+	}()
+}
+
+func (a *App) crawlPixivOnce(ctx context.Context) {
+	log.Println("Pixiv crawl started")
+
+	offset := 0
+	page := 0
+	limit := a.Cfg.PixivLimit
+
+	for {
+		ids, total, err := a.Pixiv.FetchBookmarkIDs(offset, limit, a.Cfg.PixivTag)
+		if err != nil {
+			log.Printf("pixiv bookmarks error: %v", err)
+			return
+		}
+		if len(ids) == 0 {
+			break
+		}
+
+		for _, id := range ids {
+			if ctx.Err() != nil {
+				return
+			}
+			if exists, _ := a.DB.Exists(ctx, fmt.Sprintf("pixiv_%s_p0", id)); exists {
+				continue
+			}
+
+			detail, err := a.Pixiv.FetchDetail(id)
+			if err != nil {
+				continue
+			}
+			if detail.Body.IllustType == 2 {
+				continue
+			}
+
+			tags := []string{}
+			for _, t := range detail.Body.Tags.Tags {
+				tags = append(tags, t.Tag)
+			}
+
+			pages, err := a.Pixiv.FetchPages(id)
+			if err != nil {
+				continue
+			}
+			for i, p := range pages {
+				pid := fmt.Sprintf("pixiv_%s_p%d", id, i)
+				if exists, _ := a.DB.Exists(ctx, pid); exists {
+					continue
+				}
+				imgData, err := a.Pixiv.Download(p.URL)
+				if err != nil {
+					continue
+				}
+
+				caption := detail.Body.Title
+				previewID, originID, _, _, width, height, err := a.TG.SendPreviewAndOrigin(ctx, imgData, caption)
+				if err != nil {
+					continue
+				}
+
+				sourceURL := fmt.Sprintf("https://www.pixiv.net/artworks/%s", id)
+
+				img := database.Image{
+					ID:         pid,
+					PreviewID:  previewID,
+					OriginID:   originID,
+					Title:      detail.Body.Title,
+					ArtistName: detail.Body.UserName,
+					ArtistID:   detail.Body.UserID,
+					SourceURL:  sourceURL,
+					Source:     "pixiv",
+					Tags:       strings.Join(tags, " "),
+					Width:      width,
+					Height:     height,
+					CreatedAt:  time.Now().Unix(),
+				}
+
+				if err := a.DB.InsertImage(ctx, img); err != nil {
+					log.Printf("insert error: %v", err)
+				}
+
+				time.Sleep(2 * time.Second)
+			}
+		}
+
+		page++
+		offset += limit
+		if a.Cfg.PixivMaxPages > 0 && page >= a.Cfg.PixivMaxPages {
+			break
+		}
+		if total > 0 && offset >= total {
+			break
+		}
+		time.Sleep(4 * time.Second)
+	}
+
+	log.Println("Pixiv crawl finished")
+}
+
+func channelMessageLink(channelID int64, msgID int) string {
+	s := fmt.Sprintf("%d", channelID)
+	if strings.HasPrefix(s, "-100") {
+		s = s[4:]
+	} else if strings.HasPrefix(s, "-") {
+		s = s[1:]
+	}
+	return fmt.Sprintf("https://t.me/c/%s/%d", s, msgID)
+}
+
+func chooseMsgID(previewMsgID, originMsgID int) int {
+	if originMsgID > 0 {
+		return originMsgID
+	}
+	return previewMsgID
+}

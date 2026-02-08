@@ -1,0 +1,381 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TyrGallery</title>
+    <link rel="icon" href="https://pan.0106010.xyz/file/Logo/Blog/1769235233816_IMG_20260124_141233.jpg">
+    <link rel="apple-touch-icon" href="https://pan.0106010.xyz/file/Logo/Blog/1769235233816_IMG_20260124_141233.jpg">
+    <link rel="stylesheet" href="/lib/fancybox.css">
+    <style>
+        :root {
+            --bg: #f6f7fb;
+            --text: #1a1b1f;
+            --muted: #6b7280;
+            --glass-bg: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.5);
+            --card-bg: #ffffff;
+            --card-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            --accent: #2563eb;
+            --accent-weak: rgba(37, 99, 235, 0.18);
+            --cols: 4;
+            --grid-gap: 16px;
+        }
+        [data-theme="dark"] {
+            --bg: #0f1116;
+            --text: #e5e7eb;
+            --muted: #9ca3af;
+            --glass-bg: rgba(20, 22, 28, 0.75);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --card-bg: #151821;
+            --card-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+            --accent: #93c5fd;
+            --accent-weak: rgba(147, 197, 253, 0.18);
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, "Noto Serif SC", serif;
+            margin: 0;
+            background: radial-gradient(1200px 600px at 15% 0%, rgba(37,99,235,0.08), transparent 60%),
+                        radial-gradient(1000px 500px at 85% 10%, rgba(59,130,246,0.08), transparent 55%),
+                        var(--bg);
+            color: var(--text);
+        }
+
+        .topbar {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            backdrop-filter: blur(18px);
+            background: var(--glass-bg);
+            border-bottom: 1px solid var(--glass-border);
+        }
+        .topbar-inner {
+            max-width: 1320px;
+            margin: 0 auto;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .brand-logo {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            object-fit: cover;
+            box-shadow: var(--card-shadow);
+        }
+        .title {
+            font-size: 1.7rem;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .segmented {
+            position: relative;
+            display: inline-flex;
+            padding: 4px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.3);
+            border: 1px solid var(--glass-border);
+            gap: 4px;
+        }
+        .segmented .seg-indicator {
+            position: absolute;
+            top: 4px;
+            bottom: 4px;
+            width: calc(50% - 4px);
+            border-radius: 999px;
+            background: var(--card-bg);
+            box-shadow: var(--card-shadow);
+            transition: transform 0.25s ease;
+            z-index: 0;
+        }
+        .seg-btn {
+            position: relative;
+            z-index: 1;
+            border: none;
+            background: transparent;
+            color: var(--text);
+            padding: 6px 18px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .seg-btn.active { color: var(--accent); }
+
+        .icon-btn {
+            border: 1px solid var(--glass-border);
+            background: var(--card-bg);
+            color: var(--text);
+            border-radius: 12px;
+            padding: 8px 10px;
+            cursor: pointer;
+            font-weight: 600;
+            box-shadow: var(--card-shadow);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .icon-btn svg {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+        }
+
+        .cols-control {
+            position: relative;
+        }
+        .cols-panel {
+            position: absolute;
+            top: 52px;
+            right: 0;
+            min-width: 210px;
+            padding: 12px 14px;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            box-shadow: var(--card-shadow);
+            backdrop-filter: blur(18px);
+            opacity: 0;
+            transform: translateY(-6px);
+            pointer-events: none;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+        .cols-panel.open {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+        .cols-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+            color: var(--muted);
+        }
+        .cols-range {
+            width: 100%;
+        }
+        .cols-ticks {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: var(--muted);
+            margin-top: 6px;
+            padding: 0 2px;
+        }
+
+        main.page {
+            max-width: 1320px;
+            margin: 0 auto;
+            padding: 24px 18px 60px;
+        }
+
+        /* Masonry Grid */
+        .grid {
+            margin: 0 auto;
+        }
+        .grid-sizer, .grid-item {
+            width: calc((100% - (var(--cols) - 1) * var(--grid-gap)) / var(--cols));
+            margin-bottom: var(--grid-gap);
+        }
+        .grid-item {
+            float: left;
+            background: var(--card-bg);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: var(--card-shadow);
+            background-color: rgba(0,0,0,0.02);
+            transition: transform 0.2s ease;
+            position: relative;
+        }
+        .grid-item:hover { transform: translateY(-4px); }
+        .grid-item:hover .ratio-box img[data-loaded="true"] { transform: scale(1.02); }
+        .grid-item.content-loaded {
+            background-color: var(--card-bg);
+        }
+        .ratio-box {
+            position: relative;
+            width: 100%;
+            background: rgba(0,0,0,0.04);
+        }
+        .ratio-box img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            transform: scale(1);
+            transition: opacity 0.4s, transform 0.25s ease;
+        }
+        .ratio-box img[data-loaded="true"] {
+            opacity: 1;
+        }
+
+        .card-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 14px;
+            background: linear-gradient(180deg, rgba(0,0,0,0.45), rgba(0,0,0,0));
+            color: #fff;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            pointer-events: none;
+        }
+        .grid-item:hover .card-overlay {
+            opacity: 1;
+        }
+        .card-title {
+            font-weight: 700;
+            font-size: 0.95rem;
+            text-shadow: 0 2px 6px rgba(0,0,0,0.35);
+        }
+        .card-artist {
+            margin-top: 6px;
+            font-size: 0.82rem;
+            color: rgba(255,255,255,0.85);
+            text-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        .card-artist a {
+            color: inherit;
+            text-decoration: none;
+            border-bottom: 1px dashed rgba(255,255,255,0.6);
+            pointer-events: auto;
+        }
+        .card-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        .card-actions a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            background: rgba(0,0,0,0.45);
+            border: 1px solid rgba(255,255,255,0.35);
+            color: #fff;
+            text-decoration: none;
+            pointer-events: auto;
+        }
+        .card-actions svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+        }
+
+        /* Fancybox skin tweaks */
+        .fancybox__container {
+            --fancybox-bg: rgba(15, 16, 18, 0.88);
+            --fancybox-accent-color: var(--accent);
+            --fancybox-thumbs-ratio: 1;
+        }
+        [data-theme="light"] .fancybox__container {
+            --fancybox-bg: rgba(240, 242, 245, 0.92);
+        }
+        .fancybox__toolbar {
+            left: 16px;
+            right: auto;
+        }
+        .fancybox__toolbar .fancybox__button {
+            border-radius: 10px;
+            background: rgba(0,0,0,0.35);
+        }
+        [data-theme="light"] .fancybox__toolbar .fancybox__button {
+            background: rgba(0,0,0,0.12);
+        }
+
+        /* Responsive */
+        @media (max-width: 860px) {
+            .topbar-inner { flex-direction: column; align-items: flex-start; }
+            .cols-panel { right: auto; left: 0; }
+        }
+        @media (max-width: 560px) {
+            .segmented { width: 100%; justify-content: space-between; }
+            .seg-btn { flex: 1; }
+        }
+    </style>
+</head>
+<body data-api-base="">
+    <header class="topbar">
+        <div class="topbar-inner">
+            <div class="brand">
+                <img class="brand-logo" src="https://pan.0106010.xyz/file/Logo/Blog/1769235233816_IMG_20260124_141233.jpg" alt="TyrGallery logo">
+                <div class="title">TyrGallery</div>
+            </div>
+            <div class="controls">
+                <div class="segmented" id="segmented">
+                    <span class="seg-indicator"></span>
+                    <button class="seg-btn" data-type="h">横图</button><button class="seg-btn" data-type="v">竖图</button>
+                </div>
+                <div class="cols-control" id="cols-control">
+                    <button class="icon-btn" id="columns-toggle" aria-label="列数设置">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="4" width="7" height="7"/>
+                            <rect x="14" y="4" width="7" height="7"/>
+                            <rect x="3" y="15" width="7" height="7"/>
+                            <rect x="14" y="15" width="7" height="7"/>
+                        </svg>
+                    </button>
+                    <div class="cols-panel" id="cols-panel">
+                        <div class="cols-row">
+                            <span>列数</span>
+                            <span id="cols-value">4</span>
+                        </div>
+                        <input class="cols-range" id="cols-range" type="range" min="2" max="6" value="4" step="1" list="cols-ticks">
+                        <datalist id="cols-ticks">
+                            <option value="2" label="2"></option>
+                            <option value="3" label="3"></option>
+                            <option value="4" label="4"></option>
+                            <option value="5" label="5"></option>
+                            <option value="6" label="6"></option>
+                        </datalist>
+                        <div class="cols-ticks" aria-hidden="true">
+                            <span>2</span><span>3</span><span>4</span><span>5</span><span>6</span>
+                        </div>
+                    </div>
+                </div>
+                <button class="icon-btn" id="theme-toggle" aria-label="切换主题"></button>
+            </div>
+        </div>
+    </header>
+
+    <main class="page">
+        <section id="section-h" class="gallery-section">
+            <div class="grid" id="grid-h">
+                <div class="grid-sizer"></div>
+            </div>
+        </section>
+        <section id="section-v" class="gallery-section">
+            <div class="grid" id="grid-v">
+                <div class="grid-sizer"></div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/lib/masonry.pkgd.min.js"></script>
+    <script src="/lib/imagesloaded.pkgd.min.js"></script>
+    <script src="/lib/lozad.min.js"></script>
+    <script src="/lib/fancybox.umd.js"></script>
+    <script src="/gallery.js"></script>
+</body>
+</html>
