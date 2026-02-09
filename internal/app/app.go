@@ -154,7 +154,14 @@ func (a *App) crawlPixivOnce(ctx context.Context) {
 	if order == "" {
 		order = "desc"
 	}
-	log.Printf("Pixiv crawl started (order=%s)", order)
+	log.Printf(
+		"Pixiv crawl started (order=%s, tag=%q, rest=%q, limit=%d, max_pages=%d)",
+		order,
+		a.Cfg.PixivTag,
+		a.Cfg.PixivRest,
+		a.Cfg.PixivLimit,
+		a.Cfg.PixivMaxPages,
+	)
 
 	if order == "asc" {
 		a.crawlPixivAsc(ctx)
@@ -192,6 +199,7 @@ func (a *App) crawlPixivDesc(ctx context.Context) {
 		page++
 		offset += limit
 		if shouldStopPageLoop(page, offset, total, a.Cfg.PixivMaxPages) {
+			log.Printf("Pixiv crawl stop condition reached (page=%d, offset=%d, total=%d)", page, offset, total)
 			return
 		}
 		time.Sleep(4 * time.Second)
@@ -224,6 +232,7 @@ func (a *App) crawlPixivAsc(ctx context.Context) {
 		}
 		time.Sleep(4 * time.Second)
 	}
+	log.Printf("Pixiv asc queue prepared (ids=%d)", len(allIDs))
 
 	for i := len(allIDs) - 1; i >= 0; i-- {
 		if ctx.Err() != nil {
@@ -234,15 +243,20 @@ func (a *App) crawlPixivAsc(ctx context.Context) {
 }
 
 func (a *App) processPixivID(ctx context.Context, id string) {
+	log.Printf("Pixiv processing artwork id=%s", id)
+
 	if exists, _ := a.DB.Exists(ctx, fmt.Sprintf("pixiv_%s_p0", id)); exists {
+		log.Printf("Pixiv skip artwork id=%s reason=already_exists_p0", id)
 		return
 	}
 
 	detail, err := a.Pixiv.FetchDetail(id)
 	if err != nil {
+		log.Printf("Pixiv detail failed id=%s err=%v", id, err)
 		return
 	}
 	if detail.Body.IllustType == 2 {
+		log.Printf("Pixiv skip artwork id=%s reason=ugoira", id)
 		return
 	}
 
@@ -253,21 +267,34 @@ func (a *App) processPixivID(ctx context.Context, id string) {
 
 	pages, err := a.Pixiv.FetchPages(id)
 	if err != nil {
+		log.Printf("Pixiv pages failed id=%s err=%v", id, err)
 		return
 	}
+	log.Printf("Pixiv pages loaded id=%s count=%d title=%q", id, len(pages), detail.Body.Title)
+
+	downloaded := 0
+	skipped := 0
+	failed := 0
+
 	for i, p := range pages {
 		pid := fmt.Sprintf("pixiv_%s_p%d", id, i)
 		if exists, _ := a.DB.Exists(ctx, pid); exists {
+			skipped++
+			log.Printf("Pixiv skip page pid=%s reason=already_exists", pid)
 			continue
 		}
 		imgData, err := a.Pixiv.Download(p.URL)
 		if err != nil {
+			failed++
+			log.Printf("Pixiv download failed pid=%s err=%v", pid, err)
 			continue
 		}
 
 		caption := detail.Body.Title
 		previewID, originID, _, _, width, height, err := a.TG.SendPreviewAndOrigin(ctx, imgData, caption)
 		if err != nil {
+			failed++
+			log.Printf("Pixiv tg send failed pid=%s err=%v", pid, err)
 			continue
 		}
 
@@ -289,11 +316,17 @@ func (a *App) processPixivID(ctx context.Context, id string) {
 		}
 
 		if err := a.DB.InsertImage(ctx, img); err != nil {
-			log.Printf("insert error: %v", err)
+			failed++
+			log.Printf("Pixiv d1 insert failed pid=%s err=%v", pid, err)
+		} else {
+			downloaded++
+			log.Printf("Pixiv stored pid=%s size=%dx%d", pid, width, height)
 		}
 
 		time.Sleep(2 * time.Second)
 	}
+
+	log.Printf("Pixiv artwork done id=%s title=%q downloaded=%d skipped=%d failed=%d", id, detail.Body.Title, downloaded, skipped, failed)
 }
 
 func shouldStopPageLoop(page, offset, total, maxPages int) bool {
