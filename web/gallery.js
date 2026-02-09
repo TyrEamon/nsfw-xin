@@ -172,7 +172,8 @@
     const previewURL = item.preview_id ? (API_BASE + '/image/' + item.preview_id) : '';
     const originViewURL = item.origin_id ? (API_BASE + '/image/' + item.origin_id) : '';
     const displayURL = previewURL || originViewURL || blankPixel;
-    const lightboxURL = originViewURL || previewURL || blankPixel;
+    // Use preview in lightbox first to avoid broken modal when origin fetch is unstable.
+    const lightboxURL = previewURL || originViewURL || blankPixel;
     const downloadURL = originViewURL ? (originViewURL + '?dl=1') : (previewURL ? (previewURL + '?dl=1') : blankPixel);
 
     const wrapper = document.createElement('div');
