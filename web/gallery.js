@@ -164,10 +164,13 @@
   }
 
   function createItem(item, type, idx) {
+    const blankPixel = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
     const pad = (item.height && item.width) ? (item.height / item.width * 100).toFixed(2) : 56.25;
-    const previewURL = API_BASE + '/image/' + item.preview_id;
-    const originViewURL = item.origin_id ? (API_BASE + '/image/' + item.origin_id) : previewURL;
-    const downloadURL = item.origin_id ? (API_BASE + '/image/' + item.origin_id + '?dl=1') : (previewURL + '?dl=1');
+    const previewURL = item.preview_id ? (API_BASE + '/image/' + item.preview_id) : '';
+    const originViewURL = item.origin_id ? (API_BASE + '/image/' + item.origin_id) : '';
+    const displayURL = previewURL || originViewURL || blankPixel;
+    const lightboxURL = originViewURL || previewURL || blankPixel;
+    const downloadURL = originViewURL ? (originViewURL + '?dl=1') : (previewURL ? (previewURL + '?dl=1') : blankPixel);
 
     const wrapper = document.createElement('div');
     wrapper.className = 'grid-item';
@@ -176,8 +179,8 @@
     const link = document.createElement('a');
     link.className = 'lightbox-link';
     link.setAttribute('data-fancybox', 'group-' + type);
-    link.setAttribute('data-thumb', previewURL);
-    link.setAttribute('href', originViewURL);
+    link.setAttribute('data-thumb', displayURL);
+    link.setAttribute('href', lightboxURL);
     link.setAttribute('data-caption', (item.title || 'Untitled') + ' · ' + (item.artist_name || ''));
 
     const ratio = document.createElement('div');
@@ -186,8 +189,17 @@
 
     const img = document.createElement('img');
     img.className = 'lozad';
-    img.setAttribute('data-src', previewURL);
+    img.setAttribute('data-src', displayURL);
     img.setAttribute('alt', (item.title || 'image') + '-' + (idx + 1));
+    if (originViewURL && previewURL && originViewURL !== previewURL) {
+      img.addEventListener('error', function() {
+        if (img.dataset.fallbackTried === '1') {
+          return;
+        }
+        img.dataset.fallbackTried = '1';
+        img.src = originViewURL + (originViewURL.indexOf('?') >= 0 ? '&' : '?') + 'fallback=1';
+      });
+    }
 
     ratio.appendChild(img);
     link.appendChild(ratio);
