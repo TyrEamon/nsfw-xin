@@ -95,11 +95,12 @@
             position: absolute;
             top: 4px;
             bottom: 4px;
-            width: calc(50% - 4px);
+            left: 4px;
+            width: 80px;
             border-radius: 999px;
             background: var(--card-bg);
             box-shadow: var(--card-shadow);
-            transition: transform 0.25s ease;
+            transition: left 0.25s ease, width 0.25s ease;
             z-index: 0;
         }
         .seg-btn {
@@ -335,7 +336,9 @@
             <div class="controls">
                 <div class="segmented" id="segmented">
                     <span class="seg-indicator"></span>
-                    <button class="seg-btn" data-type="h">横图</button><button class="seg-btn" data-type="v">竖图</button>
+                    <button class="seg-btn" data-type="all">ALL</button>
+                    <button class="seg-btn" data-type="h">横图</button>
+                    <button class="seg-btn" data-type="v">竖图</button>
                 </div>
                 <div class="cols-control" id="cols-control">
                     <button class="icon-btn" id="columns-toggle" aria-label="列数设置">
@@ -377,6 +380,11 @@
     </header>
 
     <main class="page">
+        <section id="section-all" class="gallery-section">
+            <div class="grid" id="grid-all">
+                <div class="grid-sizer"></div>
+            </div>
+        </section>
         <section id="section-h" class="gallery-section">
             <div class="grid" id="grid-h">
                 <div class="grid-sizer"></div>

@@ -4,11 +4,12 @@
 
   const masonryInstances = {};
   const state = {
+    all: { offset: 0, loading: false, done: false },
     h: { offset: 0, loading: false, done: false },
     v: { offset: 0, loading: false, done: false }
   };
   const BATCH_SIZE = 20;
-  let activeType = "h";
+  let activeType = "all";
 
   const segButtons = Array.prototype.slice.call(document.querySelectorAll('.seg-btn'));
   const segIndicator = document.querySelector('.seg-indicator');
@@ -19,7 +20,9 @@
     segButtons.forEach(btn => btn.classList.remove('active'));
     segButtons[idx].classList.add('active');
     if (segIndicator) {
-      segIndicator.style.transform = 'translateX(' + (idx * 100) + '%)';
+      const target = segButtons[idx];
+      segIndicator.style.left = target.offsetLeft + 'px';
+      segIndicator.style.width = target.offsetWidth + 'px';
     }
   }
 
@@ -352,6 +355,10 @@
       btn.addEventListener('click', function() {
         filterGallery(btn.dataset.type);
       });
+    });
+
+    window.addEventListener('resize', function() {
+      setActiveButton(activeType);
     });
 
     setActiveButton(activeType);
