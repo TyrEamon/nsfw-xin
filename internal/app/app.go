@@ -176,7 +176,9 @@ func (a *App) crawlPixivDesc(ctx context.Context) {
 			log.Printf("pixiv bookmarks error: %v", err)
 			return
 		}
+		log.Printf("Pixiv page fetched (offset=%d, count=%d, total=%d)", offset, len(ids), total)
 		if len(ids) == 0 {
+			log.Printf("Pixiv returned no bookmark IDs (tag=%q, rest=%q)", a.Cfg.PixivTag, a.Cfg.PixivRest)
 			return
 		}
 
@@ -208,7 +210,9 @@ func (a *App) crawlPixivAsc(ctx context.Context) {
 			log.Printf("pixiv bookmarks error: %v", err)
 			return
 		}
+		log.Printf("Pixiv page fetched (offset=%d, count=%d, total=%d)", offset, len(ids), total)
 		if len(ids) == 0 {
+			log.Printf("Pixiv returned no bookmark IDs (tag=%q, rest=%q)", a.Cfg.PixivTag, a.Cfg.PixivRest)
 			break
 		}
 		allIDs = append(allIDs, ids...)

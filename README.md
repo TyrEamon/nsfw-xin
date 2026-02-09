@@ -19,6 +19,7 @@ Pixiv:
 - PIXIV_PHPSESSID
 - PIXIV_USER_ID
 - PIXIV_TAG (optional; empty = all)
+- PIXIV_REST (optional; `show` = public bookmarks, `hide` = private bookmarks)
 - PIXIV_CRAWL_ORDER (optional; `desc` = newest to oldest, `asc` = oldest to newest)
 - PIXIV_LIMIT (default: 40)
 - PIXIV_MAX_PAGES (default: 0 = no limit)

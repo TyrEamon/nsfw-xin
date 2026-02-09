@@ -14,13 +14,18 @@ type Client struct {
 	http   *http.Client
 	cookie string
 	userID string
+	rest   string
 }
 
-func New(cookie, userID string) *Client {
+func New(cookie, userID, rest string) *Client {
+	if rest != "show" && rest != "hide" {
+		rest = "show"
+	}
 	return &Client{
 		http:   &http.Client{Timeout: 30 * time.Second},
 		cookie: cookie,
 		userID: userID,
+		rest:   rest,
 	}
 }
 
@@ -44,7 +49,7 @@ func (c *Client) FetchBookmarkIDs(offset, limit int, tag string) ([]string, int,
 	q.Set("tag", tag)
 	q.Set("offset", fmt.Sprintf("%d", offset))
 	q.Set("limit", fmt.Sprintf("%d", limit))
-	q.Set("rest", "show")
+	q.Set("rest", c.rest)
 	req, err := http.NewRequest(http.MethodGet, baseURL+"?"+q.Encode(), nil)
 	if err != nil {
 		return nil, 0, err

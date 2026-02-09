@@ -39,7 +39,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	pv := pixiv.New(cfg.PixivPHPSESSID, cfg.PixivUserID)
+	pv := pixiv.New(cfg.PixivPHPSESSID, cfg.PixivUserID, cfg.PixivRest)
 	application := app.New(cfg, db, tg, pv)
 
 	tg.Bot.RegisterHandlerMatchFunc(func(update *models.Update) bool {

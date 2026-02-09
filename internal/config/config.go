@@ -13,6 +13,7 @@ type Config struct {
 	PixivPHPSESSID       string
 	PixivUserID          string
 	PixivTag             string
+	PixivRest            string
 	PixivCrawlOrder      string
 	PixivLimit           int
 	PixivMaxPages        int
@@ -30,6 +31,7 @@ func Load() *Config {
 		PixivPHPSESSID:       os.Getenv("PIXIV_PHPSESSID"),
 		PixivUserID:          os.Getenv("PIXIV_USER_ID"),
 		PixivTag:             os.Getenv("PIXIV_TAG"),
+		PixivRest:            getEnvString("PIXIV_REST", "show"),
 		PixivCrawlOrder:      getEnvString("PIXIV_CRAWL_ORDER", "desc"),
 		PixivLimit:           getEnvInt("PIXIV_LIMIT", 40),
 		PixivMaxPages:        getEnvInt("PIXIV_MAX_PAGES", 0),
