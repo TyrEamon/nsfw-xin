@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -94,8 +95,45 @@ func (c *Client) exec(ctx context.Context, sql string, params ...interface{}) ([
 	return data.Result[0].Results, nil
 }
 
+func (c *Client) EnsureSchema(ctx context.Context) error {
+	stmts := []string{
+		"CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, preview_id TEXT, origin_id TEXT, title TEXT, artist_name TEXT, artist_id TEXT, source_url TEXT, source TEXT, tags TEXT, created_at INTEGER, width INTEGER, height INTEGER, status TEXT NOT NULL DEFAULT 'active')",
+		"CREATE INDEX IF NOT EXISTS idx_images_created_at ON images(created_at)",
+		"CREATE INDEX IF NOT EXISTS idx_images_artist ON images(artist_name)",
+		"CREATE INDEX IF NOT EXISTS idx_images_status_created_at ON images(status, created_at)",
+		"CREATE TABLE IF NOT EXISTS favorites (image_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL)",
+		"CREATE INDEX IF NOT EXISTS idx_favorites_created_at ON favorites(created_at)",
+		"CREATE TABLE IF NOT EXISTS ingest_blocklist (block_key TEXT PRIMARY KEY, reason TEXT, created_at INTEGER NOT NULL)",
+	}
+
+	for _, stmt := range stmts {
+		if _, err := c.exec(ctx, stmt); err != nil {
+			return err
+		}
+	}
+
+	cols, err := c.exec(ctx, "PRAGMA table_info(images)")
+	if err != nil {
+		return err
+	}
+	hasStatus := false
+	for _, col := range cols {
+		if name, ok := col["name"].(string); ok && strings.EqualFold(name, "status") {
+			hasStatus = true
+			break
+		}
+	}
+	if !hasStatus {
+		if _, err := c.exec(ctx, "ALTER TABLE images ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (c *Client) InsertImage(ctx context.Context, img Image) error {
-	sql := "INSERT OR IGNORE INTO images (id, preview_id, origin_id, title, artist_name, artist_id, source_url, source, tags, created_at, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+	sql := "INSERT OR IGNORE INTO images (id, preview_id, origin_id, title, artist_name, artist_id, source_url, source, tags, created_at, width, height, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 	_, err := c.exec(ctx, sql,
 		img.ID,
 		img.PreviewID,
@@ -109,6 +147,7 @@ func (c *Client) InsertImage(ctx context.Context, img Image) error {
 		img.CreatedAt,
 		img.Width,
 		img.Height,
+		"active",
 	)
 	return err
 }
@@ -126,12 +165,12 @@ func (c *Client) ListImages(ctx context.Context, offset, limit int, orientation 
 	if limit <= 0 {
 		limit = 20
 	}
-	sql := "SELECT id, preview_id, origin_id, title, artist_name, artist_id, source_url, source, tags, created_at, width, height FROM images"
-	params := []interface{}{}
+	sql := "SELECT id, preview_id, origin_id, title, artist_name, artist_id, source_url, source, tags, created_at, width, height FROM images WHERE status = ?"
+	params := []interface{}{"active"}
 	if orientation == "h" {
-		sql += " WHERE width >= height"
+		sql += " AND width >= height"
 	} else if orientation == "v" {
-		sql += " WHERE height > width"
+		sql += " AND height > width"
 	}
 	sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
 	params = append(params, limit, offset)
@@ -140,7 +179,7 @@ func (c *Client) ListImages(ctx context.Context, offset, limit int, orientation 
 }
 
 func (c *Client) GetImage(ctx context.Context, id string) (map[string]interface{}, error) {
-	sql := "SELECT id, preview_id, origin_id, title, artist_name, artist_id, source_url, source, tags, created_at, width, height FROM images WHERE id = ?"
+	sql := "SELECT id, preview_id, origin_id, title, artist_name, artist_id, source_url, source, tags, created_at, width, height, status FROM images WHERE id = ?"
 	results, err := c.exec(ctx, sql, id)
 	if err != nil {
 		return nil, err
@@ -149,4 +188,84 @@ func (c *Client) GetImage(ctx context.Context, id string) (map[string]interface{
 		return nil, nil
 	}
 	return results[0], nil
+}
+
+func (c *Client) RandomImage(ctx context.Context, orientation string) (map[string]interface{}, error) {
+	sql := "SELECT id, preview_id, title, artist_name, artist_id, source_url, source, tags, created_at, width, height FROM images WHERE status = 'active' AND preview_id != ''"
+	params := []interface{}{}
+	if orientation == "h" {
+		sql += " AND width >= height"
+	} else if orientation == "v" {
+		sql += " AND height > width"
+	}
+	sql += " ORDER BY RANDOM() LIMIT 1"
+
+	results, err := c.exec(ctx, sql, params...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return results[0], nil
+}
+
+func (c *Client) ListFavorites(ctx context.Context, offset, limit int, orientation string) ([]map[string]interface{}, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	sql := "SELECT i.id, i.preview_id, i.origin_id, i.title, i.artist_name, i.artist_id, i.source_url, i.source, i.tags, i.created_at, i.width, i.height FROM favorites f JOIN images i ON i.id = f.image_id WHERE i.status = 'active'"
+	params := []interface{}{}
+	if orientation == "h" {
+		sql += " AND i.width >= i.height"
+	} else if orientation == "v" {
+		sql += " AND i.height > i.width"
+	}
+	sql += " ORDER BY f.created_at DESC LIMIT ? OFFSET ?"
+	params = append(params, limit, offset)
+	return c.exec(ctx, sql, params...)
+}
+
+func (c *Client) SetFavorite(ctx context.Context, id string, on bool) error {
+	if on {
+		_, err := c.exec(ctx, "INSERT OR IGNORE INTO favorites (image_id, created_at) VALUES (?, ?)", id, time.Now().Unix())
+		return err
+	}
+	_, err := c.exec(ctx, "DELETE FROM favorites WHERE image_id = ?", id)
+	return err
+}
+
+func (c *Client) IsBlocked(ctx context.Context, key string) (bool, error) {
+	sql := "SELECT 1 FROM ingest_blocklist WHERE block_key = ? LIMIT 1"
+	results, err := c.exec(ctx, sql, key)
+	if err != nil {
+		return false, err
+	}
+	return len(results) > 0, nil
+}
+
+func (c *Client) HideAndBlock(ctx context.Context, id, reason string) error {
+	if _, err := c.exec(ctx, "UPDATE images SET status = 'hidden' WHERE id = ?", id); err != nil {
+		return err
+	}
+	if _, err := c.exec(ctx, "DELETE FROM favorites WHERE image_id = ?", id); err != nil {
+		return err
+	}
+	_, err := c.exec(ctx, "INSERT OR IGNORE INTO ingest_blocklist (block_key, reason, created_at) VALUES (?, ?, ?)", id, reason, time.Now().Unix())
+	return err
+}
+
+func (c *Client) ListAdminImages(ctx context.Context, offset, limit int, status string) ([]map[string]interface{}, error) {
+	if limit <= 0 {
+		limit = 60
+	}
+	sql := "SELECT i.id, i.preview_id, i.origin_id, i.title, i.artist_name, i.artist_id, i.source_url, i.source, i.tags, i.created_at, i.width, i.height, i.status, CASE WHEN f.image_id IS NULL THEN 0 ELSE 1 END AS is_favorite FROM images i LEFT JOIN favorites f ON f.image_id = i.id"
+	params := []interface{}{}
+	if status == "active" || status == "hidden" {
+		sql += " WHERE i.status = ?"
+		params = append(params, status)
+	}
+	sql += " ORDER BY i.created_at DESC LIMIT ? OFFSET ?"
+	params = append(params, limit, offset)
+	return c.exec(ctx, sql, params...)
 }

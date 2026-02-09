@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -34,6 +35,9 @@ func main() {
 	}
 
 	db := database.New(cfg.D1AccountID, cfg.D1ApiToken, cfg.D1DatabaseID)
+	if err := db.EnsureSchema(context.Background()); err != nil {
+		log.Fatalf("ensure schema error: %v", err)
+	}
 	tg, err := telegram.New(cfg.BotToken, cfg.ChannelID)
 	if err != nil {
 		log.Fatal(err)
@@ -46,7 +50,7 @@ func main() {
 		if update.Message == nil {
 			return false
 		}
-		return len(update.Message.Photo) > 0 || update.Message.Document != nil
+		return application.CanHandleTGMessage(update.Message)
 	}, func(ctx context.Context, b *bot.Bot, update *models.Update) {
 		result, err := application.HandleTGMessage(ctx, update.Message)
 		if err != nil {
@@ -54,19 +58,19 @@ func main() {
 			if update.Message != nil && update.Message.Chat.ID != cfg.ChannelID {
 				_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 					ChatID: update.Message.Chat.ID,
-					Text:   fmt.Sprintf("笨蛋，这次处理失败了喵~\n错误：%v", err),
+					Text:   fmt.Sprintf("Hmph, it failed this time, meow~\nError: %v", err),
 				})
 			}
 			return
 		}
 		if result != nil && update.Message != nil && update.Message.Chat.ID != cfg.ChannelID {
+			replyText := strings.TrimSpace(result.Summary)
+			if replyText == "" {
+				replyText = fmt.Sprintf("Done, meow~\nTitle: %s\nID: %s", result.Title, result.ID)
+			}
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID: update.Message.Chat.ID,
-				Text: fmt.Sprintf(
-					"哼，才不是特意帮你处理的喵~\n转发和录入都完成了。\n标题：%s\nID：%s",
-					result.Title,
-					result.ID,
-				),
+				Text:   replyText,
 			})
 		}
 	})

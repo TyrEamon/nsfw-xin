@@ -26,6 +26,7 @@ type TGIngestResult struct {
 	ID        string
 	Title     string
 	SourceURL string
+	Summary   string
 }
 
 func New(cfg *config.Config, db *database.Client, tg *telegram.Client, pv *pixiv.Client) *App {
@@ -87,7 +88,11 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 	}
 
 	if fileID == "" {
-		return nil, nil
+		links := extractSupportedLinks(msg.Text, msg.Caption)
+		if len(links) == 0 {
+			return nil, nil
+		}
+		return a.handleTGLinks(ctx, links)
 	}
 
 	data, _, err := a.TG.DownloadFile(ctx, fileID)
@@ -125,7 +130,18 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 		ID:        img.ID,
 		Title:     img.Title,
 		SourceURL: img.SourceURL,
+		Summary:   fmt.Sprintf("TG image saved: %s", img.ID),
 	}, nil
+}
+
+func (a *App) CanHandleTGMessage(msg *models.Message) bool {
+	if msg == nil {
+		return false
+	}
+	if len(msg.Photo) > 0 || msg.Document != nil {
+		return true
+	}
+	return len(extractSupportedLinks(msg.Text, msg.Caption)) > 0
 }
 
 func (a *App) StartPixivCrawler(ctx context.Context) {
@@ -245,88 +261,13 @@ func (a *App) crawlPixivAsc(ctx context.Context) {
 func (a *App) processPixivID(ctx context.Context, id string) {
 	log.Printf("Pixiv processing artwork id=%s", id)
 
-	if exists, _ := a.DB.Exists(ctx, fmt.Sprintf("pixiv_%s_p0", id)); exists {
-		log.Printf("Pixiv skip artwork id=%s reason=already_exists_p0", id)
-		return
-	}
-
-	detail, err := a.Pixiv.FetchDetail(id)
+	stats, err := a.ingestPixivArtwork(ctx, id, "")
 	if err != nil {
-		log.Printf("Pixiv detail failed id=%s err=%v", id, err)
-		return
-	}
-	if detail.Body.IllustType == 2 {
-		log.Printf("Pixiv skip artwork id=%s reason=ugoira", id)
+		log.Printf("Pixiv artwork failed id=%s err=%v", id, err)
 		return
 	}
 
-	tags := []string{}
-	for _, t := range detail.Body.Tags.Tags {
-		tags = append(tags, t.Tag)
-	}
-
-	pages, err := a.Pixiv.FetchPages(id)
-	if err != nil {
-		log.Printf("Pixiv pages failed id=%s err=%v", id, err)
-		return
-	}
-	log.Printf("Pixiv pages loaded id=%s count=%d title=%q", id, len(pages), detail.Body.Title)
-
-	downloaded := 0
-	skipped := 0
-	failed := 0
-
-	for i, p := range pages {
-		pid := fmt.Sprintf("pixiv_%s_p%d", id, i)
-		if exists, _ := a.DB.Exists(ctx, pid); exists {
-			skipped++
-			log.Printf("Pixiv skip page pid=%s reason=already_exists", pid)
-			continue
-		}
-		imgData, err := a.Pixiv.Download(p.URL)
-		if err != nil {
-			failed++
-			log.Printf("Pixiv download failed pid=%s err=%v", pid, err)
-			continue
-		}
-
-		caption := detail.Body.Title
-		previewID, originID, _, _, width, height, err := a.TG.SendPreviewAndOrigin(ctx, imgData, caption)
-		if err != nil {
-			failed++
-			log.Printf("Pixiv tg send failed pid=%s err=%v", pid, err)
-			continue
-		}
-
-		sourceURL := fmt.Sprintf("https://www.pixiv.net/artworks/%s", id)
-
-		img := database.Image{
-			ID:         pid,
-			PreviewID:  previewID,
-			OriginID:   originID,
-			Title:      detail.Body.Title,
-			ArtistName: detail.Body.UserName,
-			ArtistID:   detail.Body.UserID,
-			SourceURL:  sourceURL,
-			Source:     "pixiv",
-			Tags:       strings.Join(tags, " "),
-			Width:      width,
-			Height:     height,
-			CreatedAt:  time.Now().Unix(),
-		}
-
-		if err := a.DB.InsertImage(ctx, img); err != nil {
-			failed++
-			log.Printf("Pixiv d1 insert failed pid=%s err=%v", pid, err)
-		} else {
-			downloaded++
-			log.Printf("Pixiv stored pid=%s size=%dx%d", pid, width, height)
-		}
-
-		time.Sleep(2 * time.Second)
-	}
-
-	log.Printf("Pixiv artwork done id=%s title=%q downloaded=%d skipped=%d failed=%d", id, detail.Body.Title, downloaded, skipped, failed)
+	log.Printf("Pixiv artwork done id=%s title=%q downloaded=%d skipped=%d failed=%d", id, stats.Title, stats.Downloaded, stats.Skipped, stats.Failed)
 }
 
 func shouldStopPageLoop(page, offset, total, maxPages int) bool {

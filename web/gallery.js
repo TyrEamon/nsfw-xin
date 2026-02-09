@@ -1,6 +1,8 @@
 ﻿(() => {
   const apiBase = document.body.dataset.apiBase || "";
   const API_BASE = apiBase.replace(/\/$/, "");
+  const MODE = (document.body.dataset.mode || "gallery").toLowerCase();
+  const LIST_ENDPOINT = MODE === "favorites" ? "/api/favorites" : "/api/posts";
 
   const masonryInstances = {};
   const state = {
@@ -262,7 +264,7 @@
     if (state[type].loading || state[type].done) return false;
     state[type].loading = true;
 
-    const url = API_BASE + '/api/posts?type=' + encodeURIComponent(type) + '&offset=' + state[type].offset + '&limit=' + BATCH_SIZE;
+    const url = API_BASE + LIST_ENDPOINT + '?type=' + encodeURIComponent(type) + '&offset=' + state[type].offset + '&limit=' + BATCH_SIZE;
     try {
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) {

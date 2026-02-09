@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Admin Upload</title>
-  <link rel="icon" href="https://pan.0106010.xyz/file/Logo/Blog/1769235233816_IMG_20260124_141233.jpg">
+  <link rel="icon" href="https://pan.0106010.xyz/file/Bimg/1770618967630_file_470.png">
   <style>
     :root {
       --bg: #f6f7fb;
@@ -122,13 +122,100 @@
       font-size: 0.9rem;
       color: var(--muted);
     }
+
+    .manage-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .manage-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+    .manage-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .manage-actions select {
+      border: 1px solid var(--glass-border);
+      border-radius: 10px;
+      background: var(--card-bg);
+      color: var(--text);
+      padding: 8px 10px;
+    }
+    .manage-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+      gap: 10px;
+    }
+    .thumb-card {
+      position: relative;
+      border-radius: 10px;
+      overflow: hidden;
+      background: rgba(0,0,0,0.05);
+      aspect-ratio: 1 / 1;
+      border: 1px solid var(--glass-border);
+    }
+    .thumb-card img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .thumb-overlay {
+      position: absolute;
+      inset: auto 0 0 0;
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      padding: 6px;
+      background: linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,0.55));
+    }
+    .thumb-btn {
+      width: 24px;
+      height: 24px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.45);
+      background: rgba(0,0,0,0.45);
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+    }
+    .thumb-btn svg {
+      width: 14px;
+      height: 14px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .thumb-btn.favorite-on {
+      color: #ff7070;
+      border-color: rgba(255, 112, 112, 0.8);
+    }
+    .load-more-wrap {
+      margin-top: 12px;
+      text-align: center;
+    }
+    .muted {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
   </style>
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand">
-        <img class="brand-logo" src="https://pan.0106010.xyz/file/Logo/Blog/1769235233816_IMG_20260124_141233.jpg" alt="logo">
+        <img class="brand-logo" src="https://pan.0106010.xyz/file/Bimg/1770618967630_file_470.png" alt="logo">
         <div class="title">Admin Upload</div>
       </div>
       <a href="/gallery" style="text-decoration:none;color:var(--text);">Gallery</a>
@@ -147,11 +234,42 @@
       </form>
       <div class="result" id="result"></div>
     </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="manage-header">
+        <div>
+          <div class="manage-title">图片管理</div>
+          <div class="muted">缩略图预览，支持收藏和隐藏（隐藏会加入黑名单，防止爬虫回灌）。</div>
+        </div>
+        <div class="manage-actions">
+          <select id="status-filter">
+            <option value="active">仅活动</option>
+            <option value="hidden">仅隐藏</option>
+            <option value="all">全部</option>
+          </select>
+          <button class="btn" type="button" id="refresh-btn">刷新</button>
+        </div>
+      </div>
+      <div class="manage-grid" id="thumb-grid"></div>
+      <div class="load-more-wrap">
+        <button class="btn" type="button" id="load-more-btn">加载更多</button>
+      </div>
+      <div class="result" id="manage-result"></div>
+    </div>
   </main>
 
   <script>
     const form = document.getElementById('upload-form');
     const result = document.getElementById('result');
+    const grid = document.getElementById('thumb-grid');
+    const manageResult = document.getElementById('manage-result');
+    const statusFilter = document.getElementById('status-filter');
+    const loadMoreBtn = document.getElementById('load-more-btn');
+    const refreshBtn = document.getElementById('refresh-btn');
+    const PAGE_SIZE = 72;
+    let offset = 0;
+    let done = false;
+    let loading = false;
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -173,6 +291,135 @@
         result.textContent = '上传失败';
       }
     });
+
+    function svgHeart() {
+      return '<svg viewBox="0 0 24 24"><path d="M20.2 5.8a4.9 4.9 0 0 0-6.9 0L12 7.1l-1.3-1.3a4.9 4.9 0 0 0-6.9 6.9L12 21l8.2-8.3a4.9 4.9 0 0 0 0-6.9z"/></svg>';
+    }
+
+    function svgTrash() {
+      return '<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg>';
+    }
+
+    function favoriteOn(value) {
+      return value === true || value === 1 || value === '1';
+    }
+
+    async function postJSON(url, payload) {
+      const res = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'request failed');
+      }
+      return data;
+    }
+
+    function buildCard(item) {
+      const card = document.createElement('div');
+      card.className = 'thumb-card';
+      card.dataset.id = item.id || '';
+
+      const img = document.createElement('img');
+      img.loading = 'lazy';
+      img.src = item.preview_id ? ('/image/' + item.preview_id) : '';
+      img.alt = item.title || item.id || 'image';
+      card.appendChild(img);
+
+      const overlay = document.createElement('div');
+      overlay.className = 'thumb-overlay';
+
+      const favBtn = document.createElement('button');
+      favBtn.type = 'button';
+      favBtn.className = 'thumb-btn';
+      if (favoriteOn(item.is_favorite)) {
+        favBtn.classList.add('favorite-on');
+      }
+      favBtn.title = '喜欢';
+      favBtn.innerHTML = svgHeart();
+      favBtn.addEventListener('click', async () => {
+        const on = !favBtn.classList.contains('favorite-on');
+        try {
+          await postJSON('/admin/api/images/favorite', { id: item.id, on });
+          favBtn.classList.toggle('favorite-on', on);
+          manageResult.textContent = on ? '已加入喜欢' : '已取消喜欢';
+        } catch (err) {
+          manageResult.textContent = err.message || '操作失败';
+        }
+      });
+      overlay.appendChild(favBtn);
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'thumb-btn';
+      delBtn.title = '隐藏';
+      delBtn.innerHTML = svgTrash();
+      delBtn.addEventListener('click', async () => {
+        if (!window.confirm('确认隐藏这张图并加入黑名单？')) {
+          return;
+        }
+        try {
+          await postJSON('/admin/api/images/hide', { id: item.id, reason: 'admin_hide' });
+          card.remove();
+          manageResult.textContent = '已隐藏并加入黑名单';
+        } catch (err) {
+          manageResult.textContent = err.message || '删除失败';
+        }
+      });
+      overlay.appendChild(delBtn);
+
+      card.appendChild(overlay);
+      return card;
+    }
+
+    async function loadImages(reset) {
+      if (loading || done) return;
+      loading = true;
+      manageResult.textContent = '加载中...';
+      try {
+        const status = statusFilter.value;
+        const res = await fetch(`/admin/api/images?offset=${offset}&limit=${PAGE_SIZE}&status=${encodeURIComponent(status)}`, {
+          credentials: 'include'
+        });
+        const items = await res.json();
+        if (!res.ok) {
+          manageResult.textContent = items.error || '加载失败';
+          loading = false;
+          return;
+        }
+        if (!Array.isArray(items) || items.length === 0) {
+          done = true;
+          manageResult.textContent = reset ? '暂无数据' : '没有更多了';
+          loading = false;
+          return;
+        }
+        const frag = document.createDocumentFragment();
+        items.forEach((item) => frag.appendChild(buildCard(item)));
+        grid.appendChild(frag);
+        offset += items.length;
+        manageResult.textContent = `已加载 ${offset} 张`;
+      } catch (err) {
+        manageResult.textContent = '加载失败';
+      } finally {
+        loading = false;
+      }
+    }
+
+    function resetAndReload() {
+      offset = 0;
+      done = false;
+      grid.innerHTML = '';
+      loadImages(true);
+    }
+
+    loadMoreBtn.addEventListener('click', () => loadImages(false));
+    refreshBtn.addEventListener('click', resetAndReload);
+    statusFilter.addEventListener('change', resetAndReload);
+
+    resetAndReload();
   </script>
 </body>
 </html>

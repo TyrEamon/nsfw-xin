@@ -33,12 +33,18 @@ func New(cfg *config.Config, db *database.Client, tg *telegram.Client, app *app.
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/gallery", s.handleGallery)
+	mux.HandleFunc("/favorites", s.handleFavorites)
 	mux.HandleFunc("/gallery.js", s.handleGalleryJS)
 	mux.HandleFunc("/api/posts", s.handleApiPosts)
+	mux.HandleFunc("/api/favorites", s.handleApiFavorites)
+	mux.HandleFunc("/api/random", s.handleApiRandom)
 	mux.HandleFunc("/image/", s.handleImageProxy)
 
 	mux.HandleFunc("/admin", s.withAdminAuth(s.handleAdminRoot))
 	mux.HandleFunc("/admin/upload", s.withAdminAuth(s.handleAdminUpload))
+	mux.HandleFunc("/admin/api/images", s.withAdminAuth(s.handleAdminApiImages))
+	mux.HandleFunc("/admin/api/images/hide", s.withAdminAuth(s.handleAdminApiHideImage))
+	mux.HandleFunc("/admin/api/images/favorite", s.withAdminAuth(s.handleAdminApiFavorite))
 
 	mux.Handle("/lib/", http.FileServer(http.Dir(filepath.Join("web"))))
 }
@@ -49,6 +55,10 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGallery(w http.ResponseWriter, r *http.Request) {
 	s.serveFile(w, r, filepath.Join("web", "gallery.html"))
+}
+
+func (s *Server) handleFavorites(w http.ResponseWriter, r *http.Request) {
+	s.serveFile(w, r, filepath.Join("web", "favorites.html"))
 }
 
 func (s *Server) handleGalleryJS(w http.ResponseWriter, r *http.Request) {
@@ -122,6 +132,131 @@ func (s *Server) handleApiPosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(results)
+}
+
+func (s *Server) handleApiFavorites(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	q := r.URL.Query()
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	orientation := q.Get("type")
+
+	results, err := s.db.ListFavorites(r.Context(), offset, limit, orientation)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(results)
+}
+
+func (s *Server) handleApiRandom(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	orientation := r.URL.Query().Get("type")
+	item, err := s.db.RandomImage(r.Context(), orientation)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if item == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no image"})
+		return
+	}
+
+	if previewID, ok := item["preview_id"].(string); ok && previewID != "" {
+		item["preview_url"] = fmt.Sprintf("/image/%s", previewID)
+	}
+	// Random API intentionally exposes preview only.
+	delete(item, "origin_id")
+
+	json.NewEncoder(w).Encode(item)
+}
+
+func (s *Server) handleAdminApiImages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	q := r.URL.Query()
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	status := q.Get("status")
+
+	items, err := s.db.ListAdminImages(r.Context(), offset, limit, status)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(items)
+}
+
+func (s *Server) handleAdminApiHideImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	var req struct {
+		ID     string `json:"id"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	if req.ID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
+		return
+	}
+	if strings.TrimSpace(req.Reason) == "" {
+		req.Reason = "admin_hide"
+	}
+
+	if err := s.db.HideAndBlock(r.Context(), req.ID, req.Reason); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleAdminApiFavorite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	var req struct {
+		ID string `json:"id"`
+		On *bool  `json:"on"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	if req.ID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
+		return
+	}
+
+	on := true
+	if req.On != nil {
+		on = *req.On
+	}
+
+	if err := s.db.SetFavorite(r.Context(), req.ID, on); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleImageProxy(w http.ResponseWriter, r *http.Request) {

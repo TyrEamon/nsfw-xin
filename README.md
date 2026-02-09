@@ -3,6 +3,7 @@
 ## Features
 - Pixiv 收藏抓取：原图 + 压缩预览 → TG 频道 → 写入 D1
 - TG 私聊/转发图片：自动入库
+- TG 消息链接抓取：支持 Pixiv artwork 链接与 yande.re post 链接自动入库
 - 管理后台上传：浏览器上传 → TG 频道 → D1
 - 前端瀑布流：基于提供的 gallery 样式
 
