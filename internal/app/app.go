@@ -132,7 +132,7 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 		ID:        img.ID,
 		Title:     img.Title,
 		SourceURL: img.SourceURL,
-		Summary:   fmt.Sprintf("TG image saved: %s", img.ID),
+		Summary:   fmt.Sprintf("这张图我就顺手收下了喵~\n已入库 ID：%s", img.ID),
 	}, nil
 }
 

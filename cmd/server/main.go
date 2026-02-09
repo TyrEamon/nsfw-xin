@@ -58,7 +58,7 @@ func main() {
 			if update.Message != nil && update.Message.Chat.ID != cfg.ChannelID {
 				_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 					ChatID: update.Message.Chat.ID,
-					Text:   fmt.Sprintf("Hmph, it failed this time, meow~\nError: %v", err),
+					Text:   fmt.Sprintf("哼，这次才不是我失手呢喵~\n是网络在捣乱啦。\n错误：%v", err),
 				})
 			}
 			return
@@ -66,7 +66,9 @@ func main() {
 		if result != nil && update.Message != nil && update.Message.Chat.ID != cfg.ChannelID {
 			replyText := strings.TrimSpace(result.Summary)
 			if replyText == "" {
-				replyText = fmt.Sprintf("Done, meow~\nTitle: %s\nID: %s", result.Title, result.ID)
+				replyText = fmt.Sprintf("哼，才不是特地帮你处理的喵~\n标题：%s\nID：%s", result.Title, result.ID)
+			} else {
+				replyText = fmt.Sprintf("哼，结果给你啦喵~\n%s", replyText)
 			}
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID: update.Message.Chat.ID,

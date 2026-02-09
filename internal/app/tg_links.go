@@ -113,7 +113,7 @@ func (a *App) handleTGLinks(ctx context.Context, links []supportedLink) (*TGInge
 		case linkPixiv:
 			res, err := a.ingestPixivFromLink(ctx, item)
 			if err != nil {
-				errorMsgs = append(errorMsgs, fmt.Sprintf("pixiv %s: %v", item.ID, err))
+				errorMsgs = append(errorMsgs, fmt.Sprintf("Pixiv %s 失败：%v", item.ID, err))
 				continue
 			}
 			if firstID == "" && res.ID != "" {
@@ -123,7 +123,7 @@ func (a *App) handleTGLinks(ctx context.Context, links []supportedLink) (*TGInge
 		case linkYande:
 			res, err := a.ingestYandeFromLink(ctx, item)
 			if err != nil {
-				errorMsgs = append(errorMsgs, fmt.Sprintf("yande %s: %v", item.ID, err))
+				errorMsgs = append(errorMsgs, fmt.Sprintf("Yande %s 失败：%v", item.ID, err))
 				continue
 			}
 			if firstID == "" && res.ID != "" {
@@ -137,12 +137,12 @@ func (a *App) handleTGLinks(ctx context.Context, links []supportedLink) (*TGInge
 		if len(errorMsgs) == 0 {
 			return nil, nil
 		}
-		return nil, fmt.Errorf(strings.Join(errorMsgs, "; "))
+		return nil, fmt.Errorf("呜，链接处理全失败了喵~ %s", strings.Join(errorMsgs, "; "))
 	}
 
 	summary := strings.Join(successMsgs, "\n")
 	if len(errorMsgs) > 0 {
-		summary += "\nPartial fail: " + strings.Join(errorMsgs, "; ")
+		summary += "\n不过也有几条失败了喵： " + strings.Join(errorMsgs, "; ")
 	}
 
 	return &TGIngestResult{
@@ -155,7 +155,7 @@ func (a *App) handleTGLinks(ctx context.Context, links []supportedLink) (*TGInge
 
 func (a *App) ingestPixivFromLink(ctx context.Context, item supportedLink) (*TGIngestResult, error) {
 	if a.Pixiv == nil || a.Cfg.PixivPHPSESSID == "" {
-		return nil, fmt.Errorf("pixiv crawler is not configured")
+		return nil, fmt.Errorf("Pixiv 配置不完整，暂时抓不了喵")
 	}
 
 	stats, err := a.ingestPixivArtwork(ctx, item.ID, item.URL)
@@ -163,7 +163,7 @@ func (a *App) ingestPixivFromLink(ctx context.Context, item supportedLink) (*TGI
 		return nil, err
 	}
 
-	msg := fmt.Sprintf("Pixiv %s: added=%d skipped=%d failed=%d", item.ID, stats.Downloaded, stats.Skipped, stats.Failed)
+	msg := fmt.Sprintf("Pixiv %s 处理完啦喵~ 新增 %d，跳过 %d，失败 %d", item.ID, stats.Downloaded, stats.Skipped, stats.Failed)
 	return &TGIngestResult{
 		ID:        stats.FirstID,
 		Title:     stats.Title,
@@ -179,7 +179,7 @@ func (a *App) ingestYandeFromLink(ctx context.Context, item supportedLink) (*TGI
 			ID:        imgID,
 			Title:     "Yandex",
 			SourceURL: item.URL,
-			Summary:   fmt.Sprintf("Yande %s: skipped=blocked", item.ID),
+			Summary:   fmt.Sprintf("Yande %s 我才不会再收呢喵~（黑名单已拦截）", item.ID),
 		}, nil
 	}
 	if exists, _ := a.DB.Exists(ctx, imgID); exists {
@@ -187,7 +187,7 @@ func (a *App) ingestYandeFromLink(ctx context.Context, item supportedLink) (*TGI
 			ID:        imgID,
 			Title:     "Yandex",
 			SourceURL: item.URL,
-			Summary:   fmt.Sprintf("Yande %s: skipped=already_exists", item.ID),
+			Summary:   fmt.Sprintf("Yande %s 早就有了喵~（已跳过）", item.ID),
 		}, nil
 	}
 
@@ -197,7 +197,7 @@ func (a *App) ingestYandeFromLink(ctx context.Context, item supportedLink) (*TGI
 	}
 	imgURL := post.bestImageURL()
 	if imgURL == "" {
-		return nil, fmt.Errorf("no image url found")
+		return nil, fmt.Errorf("没找到可下载图片地址喵")
 	}
 	data, err := downloadWithHeaders(ctx, imgURL, "https://yande.re/")
 	if err != nil {
@@ -231,7 +231,7 @@ func (a *App) ingestYandeFromLink(ctx context.Context, item supportedLink) (*TGI
 		ID:        imgID,
 		Title:     "Yandex",
 		SourceURL: item.URL,
-		Summary:   fmt.Sprintf("Yande %s: added=1", item.ID),
+		Summary:   fmt.Sprintf("Yande %s 我顺手帮你收下了喵~（新增 1）", item.ID),
 	}, nil
 }
 

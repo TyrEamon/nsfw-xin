@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Upload</title>
+  <title>管理员后台</title>
   <link rel="icon" href="https://pan.0106010.xyz/file/Bimg/1770618967630_file_470.png">
   <style>
     :root {
@@ -209,6 +209,29 @@
       color: var(--muted);
       font-size: 0.85rem;
     }
+    .tips-card {
+      margin-top: 16px;
+      font-size: 0.9rem;
+    }
+    .tips-title {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .tips-list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+    .tips-list li {
+      margin-bottom: 8px;
+      line-height: 1.45;
+    }
+    .tips-list a {
+      color: var(--accent);
+      text-decoration: none;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
@@ -218,7 +241,7 @@
         <img class="brand-logo" src="https://pan.0106010.xyz/file/Bimg/1770618967630_file_470.png" alt="logo">
         <div class="title">Admin Upload</div>
       </div>
-      <a href="/gallery" style="text-decoration:none;color:var(--text);">Gallery</a>
+      <a href="https://tyr.mtcacg.top/gallery.html" style="text-decoration:none;color:var(--text);">Gallery</a>
     </div>
   </header>
 
@@ -233,6 +256,15 @@
         <button class="btn" type="submit">上传</button>
       </form>
       <div class="result" id="result"></div>
+    </div>
+
+    <div class="card tips-card">
+      <div class="tips-title">随机图 API 小Tips</div>
+      <ul class="tips-list">
+        <li><a href="https://pic.mtcacg.top/api/random" target="_blank" rel="noopener">https://pic.mtcacg.top/api/random</a>（随机一张）</li>
+        <li><a href="https://pic.mtcacg.top/api/random?type=h" target="_blank" rel="noopener">https://pic.mtcacg.top/api/random?type=h</a>（随机横图）</li>
+        <li><a href="https://pic.mtcacg.top/api/random?type=v" target="_blank" rel="noopener">https://pic.mtcacg.top/api/random?type=v</a>（随机竖图）</li>
+      </ul>
     </div>
 
     <div class="card" style="margin-top:16px;">
