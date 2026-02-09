@@ -1,6 +1,7 @@
 package pixiv
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,10 +28,10 @@ type bookmarkResp struct {
 	Body struct {
 		Total int `json:"total"`
 		Works []struct {
-			ID string `json:"id"`
+			ID flexString `json:"id"`
 		} `json:"works"`
 		Illusts []struct {
-			ID string `json:"id"`
+			ID flexString `json:"id"`
 		} `json:"illusts"`
 	} `json:"body"`
 	Error   bool   `json:"error"`
@@ -66,10 +67,14 @@ func (c *Client) FetchBookmarkIDs(offset, limit int, tag string) ([]string, int,
 
 	ids := []string{}
 	for _, w := range data.Body.Works {
-		ids = append(ids, w.ID)
+		if w.ID != "" {
+			ids = append(ids, string(w.ID))
+		}
 	}
 	for _, w := range data.Body.Illusts {
-		ids = append(ids, w.ID)
+		if w.ID != "" {
+			ids = append(ids, string(w.ID))
+		}
 	}
 
 	return ids, data.Body.Total, nil
@@ -189,4 +194,32 @@ func setHeaders(req *http.Request, cookie string) {
 		req.Header.Set("Cookie", "PHPSESSID="+cookie)
 	}
 	req.Header.Set("Referer", "https://www.pixiv.net/")
+}
+
+// flexString tolerates Pixiv fields that may return string or number.
+type flexString string
+
+func (s *flexString) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		*s = ""
+		return nil
+	}
+
+	if data[0] == '"' {
+		var v string
+		if err := json.Unmarshal(data, &v); err != nil {
+			return err
+		}
+		*s = flexString(v)
+		return nil
+	}
+
+	var n json.Number
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(&n); err != nil {
+		return fmt.Errorf("invalid id json value: %s", string(data))
+	}
+	*s = flexString(n.String())
+	return nil
 }
