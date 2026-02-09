@@ -342,10 +342,15 @@
     initColumns();
 
     if (window.Fancybox) {
+      const mobileViewer = window.matchMedia && window.matchMedia('(max-width: 860px)').matches;
       Fancybox.bind('[data-fancybox]', {
-        Thumbs: { autoStart: true },
+        Thumbs: { autoStart: !mobileViewer },
         Toolbar: {
-          display: {
+          display: mobileViewer ? {
+            left: ['close'],
+            middle: [],
+            right: []
+          } : {
             left: ['zoom', 'slideshow', 'fullscreen', 'thumbs', 'close'],
             middle: [],
             right: []
