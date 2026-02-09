@@ -7,39 +7,43 @@ import (
 )
 
 type Config struct {
-	BotToken             string
-	ChannelID            int64
-	AdminPassword        string
-	PixivPHPSESSID       string
-	PixivUserID          string
-	PixivTag             string
-	PixivRest            string
-	PixivCrawlOrder      string
-	PixivLimit           int
-	PixivMaxPages        int
-	PixivIntervalMinutes int
-	D1AccountID          string
-	D1ApiToken           string
-	D1DatabaseID         string
-	ListenAddr           string
+	BotToken                 string
+	ChannelID                int64
+	AdminPassword            string
+	PixivPHPSESSID           string
+	PixivUserID              string
+	PixivTag                 string
+	PixivRest                string
+	PixivCrawlOrder          string
+	PixivLimit               int
+	PixivMaxPages            int
+	PixivBootstrapMaxPages   int
+	PixivIncrementalMaxPages int
+	PixivIntervalMinutes     int
+	D1AccountID              string
+	D1ApiToken               string
+	D1DatabaseID             string
+	ListenAddr               string
 }
 
 func Load() *Config {
 	cfg := &Config{
-		BotToken:             os.Getenv("BOT_TOKEN"),
-		AdminPassword:        os.Getenv("ADMIN_PASSWORD"),
-		PixivPHPSESSID:       os.Getenv("PIXIV_PHPSESSID"),
-		PixivUserID:          os.Getenv("PIXIV_USER_ID"),
-		PixivTag:             os.Getenv("PIXIV_TAG"),
-		PixivRest:            getEnvString("PIXIV_REST", "show"),
-		PixivCrawlOrder:      getEnvString("PIXIV_CRAWL_ORDER", "desc"),
-		PixivLimit:           getEnvInt("PIXIV_LIMIT", 40),
-		PixivMaxPages:        getEnvInt("PIXIV_MAX_PAGES", 0),
-		PixivIntervalMinutes: getEnvInt("PIXIV_INTERVAL_MINUTES", 120),
-		D1AccountID:          os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
-		D1ApiToken:           os.Getenv("CLOUDFLARE_API_TOKEN"),
-		D1DatabaseID:         os.Getenv("D1_DATABASE_ID"),
-		ListenAddr:           getEnvString("LISTEN_ADDR", ":8080"),
+		BotToken:                 os.Getenv("BOT_TOKEN"),
+		AdminPassword:            os.Getenv("ADMIN_PASSWORD"),
+		PixivPHPSESSID:           os.Getenv("PIXIV_PHPSESSID"),
+		PixivUserID:              os.Getenv("PIXIV_USER_ID"),
+		PixivTag:                 os.Getenv("PIXIV_TAG"),
+		PixivRest:                getEnvString("PIXIV_REST", "show"),
+		PixivCrawlOrder:          getEnvString("PIXIV_CRAWL_ORDER", "desc"),
+		PixivLimit:               getEnvInt("PIXIV_LIMIT", 40),
+		PixivMaxPages:            getEnvInt("PIXIV_MAX_PAGES", 0),
+		PixivBootstrapMaxPages:   getEnvInt("PIXIV_BOOTSTRAP_MAX_PAGES", -1),
+		PixivIncrementalMaxPages: getEnvInt("PIXIV_INCREMENTAL_MAX_PAGES", 2),
+		PixivIntervalMinutes:     getEnvInt("PIXIV_INTERVAL_MINUTES", 120),
+		D1AccountID:              os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
+		D1ApiToken:               os.Getenv("CLOUDFLARE_API_TOKEN"),
+		D1DatabaseID:             os.Getenv("D1_DATABASE_ID"),
+		ListenAddr:               getEnvString("LISTEN_ADDR", ":8080"),
 	}
 
 	channelStr := os.Getenv("CHANNEL_ID")

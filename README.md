@@ -24,6 +24,8 @@ Pixiv:
 - PIXIV_CRAWL_ORDER (optional; `desc` = newest to oldest, `asc` = oldest to newest)
 - PIXIV_LIMIT (default: 40)
 - PIXIV_MAX_PAGES (default: 0 = no limit)
+- PIXIV_BOOTSTRAP_MAX_PAGES (default: inherit `PIXIV_MAX_PAGES`; `0` = no limit)
+- PIXIV_INCREMENTAL_MAX_PAGES (default: 2, used after bootstrap done)
 - PIXIV_INTERVAL_MINUTES (default: 120)
 
 Server:

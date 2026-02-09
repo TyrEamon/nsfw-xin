@@ -30,3 +30,9 @@ CREATE TABLE IF NOT EXISTS ingest_blocklist (
   reason TEXT,
   created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS crawler_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);

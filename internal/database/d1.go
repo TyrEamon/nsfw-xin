@@ -104,6 +104,7 @@ func (c *Client) EnsureSchema(ctx context.Context) error {
 		"CREATE TABLE IF NOT EXISTS favorites (image_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL)",
 		"CREATE INDEX IF NOT EXISTS idx_favorites_created_at ON favorites(created_at)",
 		"CREATE TABLE IF NOT EXISTS ingest_blocklist (block_key TEXT PRIMARY KEY, reason TEXT, created_at INTEGER NOT NULL)",
+		"CREATE TABLE IF NOT EXISTS crawler_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)",
 	}
 
 	for _, stmt := range stmts {
@@ -268,4 +269,21 @@ func (c *Client) ListAdminImages(ctx context.Context, offset, limit int, status 
 	sql += " ORDER BY i.created_at DESC LIMIT ? OFFSET ?"
 	params = append(params, limit, offset)
 	return c.exec(ctx, sql, params...)
+}
+
+func (c *Client) GetCrawlerState(ctx context.Context, key string) (string, bool, error) {
+	results, err := c.exec(ctx, "SELECT value FROM crawler_state WHERE key = ? LIMIT 1", key)
+	if err != nil {
+		return "", false, err
+	}
+	if len(results) == 0 {
+		return "", false, nil
+	}
+	val, _ := results[0]["value"].(string)
+	return val, true, nil
+}
+
+func (c *Client) SetCrawlerState(ctx context.Context, key, value string) error {
+	_, err := c.exec(ctx, "INSERT OR REPLACE INTO crawler_state (key, value, updated_at) VALUES (?, ?, ?)", key, value, time.Now().Unix())
+	return err
 }

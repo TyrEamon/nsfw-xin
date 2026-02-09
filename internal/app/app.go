@@ -22,6 +22,8 @@ type App struct {
 	Pixiv *pixiv.Client
 }
 
+const pixivBootstrapStateKey = "pixiv_bootstrap_done"
+
 type TGIngestResult struct {
 	ID        string
 	Title     string
@@ -170,25 +172,62 @@ func (a *App) crawlPixivOnce(ctx context.Context) {
 	if order == "" {
 		order = "desc"
 	}
+	bootstrapDone := false
+	if val, ok, err := a.DB.GetCrawlerState(ctx, pixivBootstrapStateKey); err == nil && ok && val == "1" {
+		bootstrapDone = true
+	}
+	maxPages := a.resolvePixivMaxPages(bootstrapDone)
+	mode := "bootstrap"
+	if bootstrapDone {
+		mode = "incremental"
+	}
 	log.Printf(
-		"Pixiv crawl started (order=%s, tag=%q, rest=%q, limit=%d, max_pages=%d)",
+		"Pixiv crawl started (mode=%s, order=%s, tag=%q, rest=%q, limit=%d, max_pages=%d)",
+		mode,
 		order,
 		a.Cfg.PixivTag,
 		a.Cfg.PixivRest,
 		a.Cfg.PixivLimit,
-		a.Cfg.PixivMaxPages,
+		maxPages,
 	)
 
+	var err error
 	if order == "asc" {
-		a.crawlPixivAsc(ctx)
+		err = a.crawlPixivAsc(ctx, maxPages)
 	} else {
-		a.crawlPixivDesc(ctx)
+		err = a.crawlPixivDesc(ctx, maxPages)
+	}
+	if err != nil {
+		log.Printf("Pixiv crawl failed: %v", err)
+		log.Println("Pixiv crawl finished")
+		return
+	}
+
+	if !bootstrapDone {
+		if err := a.DB.SetCrawlerState(ctx, pixivBootstrapStateKey, "1"); err != nil {
+			log.Printf("Pixiv bootstrap state write failed: %v", err)
+		} else {
+			log.Printf("Pixiv bootstrap state updated: %s=1", pixivBootstrapStateKey)
+		}
 	}
 
 	log.Println("Pixiv crawl finished")
 }
 
-func (a *App) crawlPixivDesc(ctx context.Context) {
+func (a *App) resolvePixivMaxPages(bootstrapDone bool) int {
+	if bootstrapDone {
+		if a.Cfg.PixivIncrementalMaxPages >= 0 {
+			return a.Cfg.PixivIncrementalMaxPages
+		}
+		return 2
+	}
+	if a.Cfg.PixivBootstrapMaxPages >= 0 {
+		return a.Cfg.PixivBootstrapMaxPages
+	}
+	return a.Cfg.PixivMaxPages
+}
+
+func (a *App) crawlPixivDesc(ctx context.Context, maxPages int) error {
 	offset := 0
 	page := 0
 	limit := a.Cfg.PixivLimit
@@ -196,33 +235,32 @@ func (a *App) crawlPixivDesc(ctx context.Context) {
 	for {
 		ids, total, err := a.Pixiv.FetchBookmarkIDs(offset, limit, a.Cfg.PixivTag)
 		if err != nil {
-			log.Printf("pixiv bookmarks error: %v", err)
-			return
+			return fmt.Errorf("pixiv bookmarks error: %w", err)
 		}
 		log.Printf("Pixiv page fetched (offset=%d, count=%d, total=%d)", offset, len(ids), total)
 		if len(ids) == 0 {
 			log.Printf("Pixiv returned no bookmark IDs (tag=%q, rest=%q)", a.Cfg.PixivTag, a.Cfg.PixivRest)
-			return
+			return nil
 		}
 
 		for _, id := range ids {
 			if ctx.Err() != nil {
-				return
+				return nil
 			}
 			a.processPixivID(ctx, id)
 		}
 
 		page++
 		offset += limit
-		if shouldStopPageLoop(page, offset, total, a.Cfg.PixivMaxPages) {
+		if shouldStopPageLoop(page, offset, total, maxPages) {
 			log.Printf("Pixiv crawl stop condition reached (page=%d, offset=%d, total=%d)", page, offset, total)
-			return
+			return nil
 		}
 		time.Sleep(4 * time.Second)
 	}
 }
 
-func (a *App) crawlPixivAsc(ctx context.Context) {
+func (a *App) crawlPixivAsc(ctx context.Context, maxPages int) error {
 	offset := 0
 	page := 0
 	limit := a.Cfg.PixivLimit
@@ -231,8 +269,7 @@ func (a *App) crawlPixivAsc(ctx context.Context) {
 	for {
 		ids, total, err := a.Pixiv.FetchBookmarkIDs(offset, limit, a.Cfg.PixivTag)
 		if err != nil {
-			log.Printf("pixiv bookmarks error: %v", err)
-			return
+			return fmt.Errorf("pixiv bookmarks error: %w", err)
 		}
 		log.Printf("Pixiv page fetched (offset=%d, count=%d, total=%d)", offset, len(ids), total)
 		if len(ids) == 0 {
@@ -243,7 +280,7 @@ func (a *App) crawlPixivAsc(ctx context.Context) {
 
 		page++
 		offset += limit
-		if shouldStopPageLoop(page, offset, total, a.Cfg.PixivMaxPages) {
+		if shouldStopPageLoop(page, offset, total, maxPages) {
 			break
 		}
 		time.Sleep(4 * time.Second)
@@ -252,10 +289,11 @@ func (a *App) crawlPixivAsc(ctx context.Context) {
 
 	for i := len(allIDs) - 1; i >= 0; i-- {
 		if ctx.Err() != nil {
-			return
+			return nil
 		}
 		a.processPixivID(ctx, allIDs[i])
 	}
+	return nil
 }
 
 func (a *App) processPixivID(ctx context.Context, id string) {
