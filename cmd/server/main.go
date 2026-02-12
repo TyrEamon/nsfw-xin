@@ -16,6 +16,7 @@ import (
 	"pixiv-tg-gallery/internal/database"
 	"pixiv-tg-gallery/internal/pixiv"
 	"pixiv-tg-gallery/internal/telegram"
+	"pixiv-tg-gallery/internal/umami"
 	"pixiv-tg-gallery/internal/web"
 
 	"github.com/go-telegram/bot"
@@ -45,6 +46,14 @@ func main() {
 
 	pv := pixiv.New(cfg.PixivPHPSESSID, cfg.PixivUserID, cfg.PixivRest)
 	application := app.New(cfg, db, tg, pv)
+	um := umami.New(umami.Config{
+		BaseURL:      cfg.UmamiBaseURL,
+		WebsiteID:    cfg.UmamiWebsiteIDFrontend,
+		Username:     cfg.UmamiUsername,
+		Password:     cfg.UmamiPassword,
+		APIToken:     cfg.UmamiAPIToken,
+		LookbackDays: cfg.UmamiLookbackDays,
+	})
 
 	tg.Bot.RegisterHandlerMatchFunc(func(update *models.Update) bool {
 		if update.Message == nil {
@@ -83,7 +92,7 @@ func main() {
 	application.StartPixivCrawler(ctx)
 
 	mux := http.NewServeMux()
-	server := web.New(cfg, db, tg, application)
+	server := web.New(cfg, db, tg, application, um)
 	server.Register(mux)
 
 	httpSrv := &http.Server{Addr: cfg.ListenAddr, Handler: mux}

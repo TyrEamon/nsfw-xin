@@ -17,17 +17,19 @@ import (
 	"pixiv-tg-gallery/internal/config"
 	"pixiv-tg-gallery/internal/database"
 	"pixiv-tg-gallery/internal/telegram"
+	"pixiv-tg-gallery/internal/umami"
 )
 
 type Server struct {
-	cfg *config.Config
-	db  *database.Client
-	tg  *telegram.Client
-	app *app.App
+	cfg   *config.Config
+	db    *database.Client
+	tg    *telegram.Client
+	app   *app.App
+	umami *umami.Client
 }
 
-func New(cfg *config.Config, db *database.Client, tg *telegram.Client, app *app.App) *Server {
-	return &Server{cfg: cfg, db: db, tg: tg, app: app}
+func New(cfg *config.Config, db *database.Client, tg *telegram.Client, app *app.App, um *umami.Client) *Server {
+	return &Server{cfg: cfg, db: db, tg: tg, app: app, umami: um}
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -45,6 +47,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/images", s.withAdminAuth(s.handleAdminApiImages))
 	mux.HandleFunc("/admin/api/images/hide", s.withAdminAuth(s.handleAdminApiHideImage))
 	mux.HandleFunc("/admin/api/images/favorite", s.withAdminAuth(s.handleAdminApiFavorite))
+	mux.HandleFunc("/admin/api/umami/summary", s.withAdminAuth(s.handleAdminApiUmamiSummary))
 
 	mux.Handle("/lib/", http.FileServer(http.Dir(filepath.Join("web"))))
 }
@@ -257,6 +260,26 @@ func (s *Server) handleAdminApiFavorite(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleAdminApiUmamiSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if s.umami == nil || !s.umami.Enabled() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "umami not configured"})
+		return
+	}
+
+	summary, err := s.umami.GetSummary(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, summary)
 }
 
 func (s *Server) handleImageProxy(w http.ResponseWriter, r *http.Request) {

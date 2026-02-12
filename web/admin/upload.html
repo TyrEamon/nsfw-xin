@@ -247,24 +247,53 @@
       font-size: 1rem;
       font-weight: 700;
     }
-    .stats-frame-wrap {
+    .stats-grid {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(120px, 1fr));
+      gap: 10px;
+    }
+    .stat-box {
       border: 1px solid var(--glass-border);
       border-radius: 12px;
-      overflow: hidden;
+      padding: 12px 12px 10px;
       background: rgba(0,0,0,0.03);
     }
-    .stats-frame {
-      width: 100%;
-      height: 520px;
-      border: 0;
-      display: block;
-      background: transparent;
-    }
-    .stats-empty {
-      padding: 14px;
+    .stat-label {
       color: var(--muted);
-      font-size: 0.9rem;
-      line-height: 1.5;
+      font-size: 0.82rem;
+      margin-bottom: 4px;
+    }
+    .stat-value {
+      font-size: 1.45rem;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+    .country-wrap {
+      margin-top: 10px;
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(0,0,0,0.03);
+    }
+    .country-list {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      color: var(--text);
+      font-size: 0.92rem;
+    }
+    .country-list li {
+      margin-bottom: 4px;
+    }
+    .stats-note {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    @media (max-width: 640px) {
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -296,14 +325,30 @@
       <div class="stats-header">
         <div>
           <div class="stats-title">访问统计（tyr.mtcacg.top）</div>
-          <div class="muted">这里展示前台站点的 Umami 只读面板。</div>
+          <div class="muted">最近 <span id="stat-range-days">7</span> 天汇总</div>
         </div>
-        <a class="btn" id="umami-open-link" href="#" target="_blank" rel="noopener" style="text-decoration:none;display:none;">新窗口打开</a>
+        <a class="btn" id="umami-open-link" href="#" target="_blank" rel="noopener" style="text-decoration:none;display:none;">UMARI LINK</a>
       </div>
-      <div class="stats-frame-wrap">
-        <iframe id="umami-share-frame" class="stats-frame" title="umami stats" loading="lazy" referrerpolicy="no-referrer"></iframe>
-        <div id="umami-share-empty" class="stats-empty">未配置 Umami 分享链接。请在本页 <code>data-umami-share-url</code> 填入 tyr 站点的 share URL。</div>
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-label">访客</div>
+          <div class="stat-value" id="stat-visitors">-</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">访问次数</div>
+          <div class="stat-value" id="stat-visits">-</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">浏览量</div>
+          <div class="stat-value" id="stat-pageviews">-</div>
+        </div>
       </div>
+      <div class="country-wrap">
+        <div class="stat-label">访问国家</div>
+        <ol id="stat-countries" class="country-list"></ol>
+        <div class="stats-note" id="stat-updated"></div>
+      </div>
+      <div class="result" id="stats-result"></div>
     </div>
 
     <div class="card tips-card">
@@ -391,25 +436,72 @@
       }
     }
 
-    function initUmamiSharePanel() {
+    function initUmamiLinkButton() {
       const shareUrl = (document.body.dataset.umamiShareUrl || '').trim();
-      const frame = document.getElementById('umami-share-frame');
-      const empty = document.getElementById('umami-share-empty');
       const link = document.getElementById('umami-open-link');
-      if (!frame || !empty || !link) return;
-
-      if (!shareUrl) {
-        frame.style.display = 'none';
-        empty.style.display = 'block';
-        link.style.display = 'none';
-        return;
-      }
-
-      frame.src = shareUrl;
-      frame.style.display = 'block';
-      empty.style.display = 'none';
+      if (!link) return;
+      if (!shareUrl) return;
       link.href = shareUrl;
       link.style.display = 'inline-flex';
+    }
+
+    function formatNumber(v) {
+      return Number(v || 0).toLocaleString('zh-CN');
+    }
+
+    function renderCountries(items) {
+      const list = document.getElementById('stat-countries');
+      if (!list) return;
+      list.innerHTML = '';
+      if (!Array.isArray(items) || items.length === 0) {
+        const li = document.createElement('li');
+        li.textContent = '暂无数据';
+        list.appendChild(li);
+        return;
+      }
+      items.slice(0, 8).forEach((item) => {
+        const li = document.createElement('li');
+        const name = (item && item.name) ? String(item.name) : 'Unknown';
+        const count = item && item.count ? Number(item.count) : 0;
+        li.textContent = `${name}：${formatNumber(count)}`;
+        list.appendChild(li);
+      });
+    }
+
+    async function loadUmamiSummary() {
+      const statusEl = document.getElementById('stats-result');
+      try {
+        const res = await fetch('/admin/api/umami/summary', {
+          credentials: 'include',
+          cache: 'no-store'
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (statusEl) statusEl.textContent = data.error || '统计加载失败';
+          return;
+        }
+
+        const visitors = document.getElementById('stat-visitors');
+        const visits = document.getElementById('stat-visits');
+        const pageviews = document.getElementById('stat-pageviews');
+        const rangeDays = document.getElementById('stat-range-days');
+        const updated = document.getElementById('stat-updated');
+
+        if (visitors) visitors.textContent = formatNumber(data.visitors);
+        if (visits) visits.textContent = formatNumber(data.visits);
+        if (pageviews) pageviews.textContent = formatNumber(data.pageviews);
+        if (rangeDays) rangeDays.textContent = String(data.range_days || 7);
+
+        const ts = Number(data.updated_at || 0);
+        if (updated) {
+          updated.textContent = ts > 0 ? `更新：${new Date(ts * 1000).toLocaleString('zh-CN')}` : '';
+        }
+
+        renderCountries(data.countries);
+        if (statusEl) statusEl.textContent = '';
+      } catch (err) {
+        if (statusEl) statusEl.textContent = '统计加载失败';
+      }
     }
 
     form.addEventListener('submit', async (e) => {
@@ -575,7 +667,8 @@
     refreshBtn.addEventListener('click', resetAndReload);
     statusFilter.addEventListener('change', resetAndReload);
 
-    initUmamiSharePanel();
+    initUmamiLinkButton();
+    loadUmamiSummary();
     resetAndReload();
   </script>
 </body>

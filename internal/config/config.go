@@ -10,6 +10,12 @@ type Config struct {
 	BotToken                 string
 	ChannelID                int64
 	AdminPassword            string
+	UmamiBaseURL             string
+	UmamiWebsiteIDFrontend   string
+	UmamiUsername            string
+	UmamiPassword            string
+	UmamiAPIToken            string
+	UmamiLookbackDays        int
 	PixivPHPSESSID           string
 	PixivUserID              string
 	PixivTag                 string
@@ -30,6 +36,12 @@ func Load() *Config {
 	cfg := &Config{
 		BotToken:                 os.Getenv("BOT_TOKEN"),
 		AdminPassword:            os.Getenv("ADMIN_PASSWORD"),
+		UmamiBaseURL:             getEnvString("UMAMI_BASE_URL", ""),
+		UmamiWebsiteIDFrontend:   os.Getenv("UMAMI_WEBSITE_ID_FRONTEND"),
+		UmamiUsername:            os.Getenv("UMAMI_USERNAME"),
+		UmamiPassword:            os.Getenv("UMAMI_PASSWORD"),
+		UmamiAPIToken:            os.Getenv("UMAMI_API_TOKEN"),
+		UmamiLookbackDays:        getEnvInt("UMAMI_LOOKBACK_DAYS", 7),
 		PixivPHPSESSID:           os.Getenv("PIXIV_PHPSESSID"),
 		PixivUserID:              os.Getenv("PIXIV_USER_ID"),
 		PixivTag:                 os.Getenv("PIXIV_TAG"),

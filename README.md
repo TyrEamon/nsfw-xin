@@ -117,6 +117,11 @@ Pixiv:
 
 Server:
 - `LISTEN_ADDR` (default `:8080`)
+- `UMAMI_BASE_URL` (optional, e.g. `https://umamii.zeabur.app`)
+- `UMAMI_WEBSITE_ID_FRONTEND` (optional, Umami website id for `tyr.mtcacg.top`)
+- `UMAMI_LOOKBACK_DAYS` (optional, default `7`)
+- `UMAMI_API_TOKEN` (optional, static token mode)
+- `UMAMI_USERNAME` + `UMAMI_PASSWORD` (optional, auto-login mode; recommended)
 
 ## Bootstrap vs Incremental Crawl
 
@@ -171,6 +176,8 @@ Admin APIs (Basic Auth):
   - body: `{"id":"...", "reason":"admin_hide"}`
 - `POST /admin/api/images/favorite`
   - body: `{"id":"...", "on":true|false}`
+- `GET /admin/api/umami/summary`
+  - returns: `visitors`, `visits`, `pageviews`, `countries`, `range_days`, `updated_at`
 
 ## Database
 
@@ -208,6 +215,10 @@ Set your Umami website id in these files:
 - `web/admin/upload.html` -> `data-umami-website-id`
 
 Current Umami host is preset to `https://umamii.zeabur.app`.
+
+For admin stats card (`/admin/upload`), backend calls Umami API:
+- Prefer `UMAMI_USERNAME` + `UMAMI_PASSWORD` so backend can auto-login and refresh session token.
+- `UMAMI_API_TOKEN` can be used as fallback static token.
 
 If Zeabur fails pulling GHCR image (401):
 - Make package public, or
