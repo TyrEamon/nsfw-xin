@@ -156,26 +156,69 @@ func (s *Server) handleApiFavorites(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleApiRandom(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 	orientation := r.URL.Query().Get("type")
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
 	item, err := s.db.RandomImage(r.Context(), orientation)
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	if item == nil {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no image"})
 		return
 	}
 
+	previewPath := ""
 	if previewID, ok := item["preview_id"].(string); ok && previewID != "" {
-		item["preview_url"] = fmt.Sprintf("/image/%s", previewID)
+		previewPath = fmt.Sprintf("/image/%s", previewID)
+		item["preview_url"] = previewPath
 	}
+
+	if previewPath == "" {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "preview not found"})
+		return
+	}
+
+	if format == "url" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(buildAbsoluteURL(r, previewPath)))
+		return
+	}
+
+	if format == "redirect" {
+		w.Header().Set("Cache-Control", "no-store")
+		http.Redirect(w, r, previewPath, http.StatusFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	// Random API intentionally exposes preview only.
 	delete(item, "origin_id")
 
 	json.NewEncoder(w).Encode(item)
+}
+
+func buildAbsoluteURL(r *http.Request, path string) string {
+	scheme := "https"
+	if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto != "" {
+		scheme = strings.TrimSpace(strings.Split(proto, ",")[0])
+	} else if r.TLS == nil {
+		scheme = "http"
+	}
+
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(r.Host)
+	}
+	if host == "" {
+		return path
+	}
+	return fmt.Sprintf("%s://%s%s", scheme, host, path)
 }
 
 func (s *Server) handleAdminApiImages(w http.ResponseWriter, r *http.Request) {

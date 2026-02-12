@@ -85,6 +85,8 @@ Behavior:
 - `/api/random`
 - `/api/random?type=h`
 - `/api/random?type=v`
+- `/api/random?format=url`
+- `/api/random?format=redirect`
 - Intentionally removes `origin_id` in response
 
 ## Requirements
@@ -167,6 +169,8 @@ Public APIs:
 - `GET /api/random`
 - `GET /api/random?type=h`
 - `GET /api/random?type=v`
+- `GET /api/random?format=url`
+- `GET /api/random?format=redirect`
 - `GET /image/{file_id}`
   - optional `?dl=1` to force download header
 
