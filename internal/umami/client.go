@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -154,21 +155,34 @@ func (c *Client) fetchCountries(ctx context.Context, start, end int64) ([]Countr
 
 	var lastErr error
 	for _, p := range paths {
-		var rows []struct {
-			X interface{} `json:"x"`
-			Y int         `json:"y"`
-		}
+		var rows []map[string]interface{}
 		if err := c.getJSON(ctx, p, &rows); err != nil {
 			lastErr = err
 			continue
 		}
 		out := make([]CountryStat, 0, len(rows))
 		for _, row := range rows {
-			name := normalizeCountryName(row.X)
+			name := normalizeCountryName(row["x"])
+			if name == "" {
+				name = normalizeCountryName(row["name"])
+			}
+			if name == "" {
+				name = normalizeCountryName(row["country"])
+			}
+			count := parseMetricCount(row["y"])
+			if count == 0 {
+				count = parseMetricCount(row["count"])
+			}
+			if count == 0 {
+				count = parseMetricCount(row["value"])
+			}
+			if count <= 0 {
+				continue
+			}
 			if name == "" {
 				name = "Unknown"
 			}
-			out = append(out, CountryStat{Name: name, Count: row.Y})
+			out = append(out, CountryStat{Name: name, Count: count})
 		}
 		return out, nil
 	}
@@ -181,17 +195,55 @@ func (c *Client) fetchCountries(ctx context.Context, start, end int64) ([]Countr
 
 func normalizeCountryName(v interface{}) string {
 	switch t := v.(type) {
+	case nil:
+		return ""
 	case string:
 		return strings.TrimSpace(t)
 	case map[string]interface{}:
-		if name, ok := t["name"].(string); ok && strings.TrimSpace(name) != "" {
-			return strings.TrimSpace(name)
+		keys := []string{"name", "country", "countryName", "country_name", "code", "countryCode", "country_code"}
+		for _, key := range keys {
+			if val, ok := t[key]; ok {
+				if s, ok := val.(string); ok && strings.TrimSpace(s) != "" {
+					return strings.TrimSpace(s)
+				}
+			}
 		}
-		if code, ok := t["code"].(string); ok && strings.TrimSpace(code) != "" {
-			return strings.TrimSpace(code)
-		}
+		return ""
 	}
 	return strings.TrimSpace(fmt.Sprintf("%v", v))
+}
+
+func parseMetricCount(v interface{}) int {
+	switch t := v.(type) {
+	case nil:
+		return 0
+	case float64:
+		return int(t)
+	case float32:
+		return int(t)
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case int32:
+		return int(t)
+	case json.Number:
+		if i, err := t.Int64(); err == nil {
+			return int(i)
+		}
+		if f, err := t.Float64(); err == nil {
+			return int(f)
+		}
+	case string:
+		s := strings.TrimSpace(t)
+		if s == "" {
+			return 0
+		}
+		if i, err := strconv.Atoi(s); err == nil {
+			return i
+		}
+	}
+	return 0
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, dest interface{}) error {
