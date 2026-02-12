@@ -169,7 +169,17 @@ func (c *Client) fetchCountries(ctx context.Context, start, end int64) ([]Countr
 			if name == "" {
 				name = normalizeCountryName(row["country"])
 			}
-			count := parseMetricCount(row["y"])
+			// Umami metrics/expanded uses visitors/visits/pageviews fields.
+			count := parseMetricCount(row["visitors"])
+			if count == 0 {
+				count = parseMetricCount(row["visits"])
+			}
+			if count == 0 {
+				count = parseMetricCount(row["pageviews"])
+			}
+			if count == 0 {
+				count = parseMetricCount(row["y"])
+			}
 			if count == 0 {
 				count = parseMetricCount(row["count"])
 			}
