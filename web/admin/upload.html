@@ -234,7 +234,7 @@
     }
   </style>
 </head>
-<body>
+<body data-umami-host="https://umamii.zeabur.app" data-umami-website-id="f64b3794-0fe6-4436-bf85-d3c52fb1dad5">
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand">
@@ -302,6 +302,46 @@
     let offset = 0;
     let done = false;
     let loading = false;
+    const analytics = initAnalytics();
+
+    function readUmamiConfig() {
+      const host = (document.body.dataset.umamiHost || '').trim().replace(/\/$/, '');
+      const websiteId = (document.body.dataset.umamiWebsiteId || '').trim();
+      return { host, websiteId };
+    }
+
+    function initAnalytics() {
+      const cfg = readUmamiConfig();
+      if (!cfg.host || !cfg.websiteId) {
+        return { enabled: false };
+      }
+
+      if (!window.umami && !document.querySelector('script[data-umami-loader="1"]')) {
+        const script = document.createElement('script');
+        script.defer = true;
+        script.src = cfg.host + '/script.js';
+        script.setAttribute('data-website-id', cfg.websiteId);
+        script.setAttribute('data-auto-track', 'false');
+        script.setAttribute('data-umami-loader', '1');
+        document.head.appendChild(script);
+      }
+
+      return { enabled: true };
+    }
+
+    function trackEvent(name, payload) {
+      if (!analytics.enabled) return;
+      if (!window.umami || typeof window.umami.track !== 'function') return;
+      try {
+        if (payload && Object.keys(payload).length > 0) {
+          window.umami.track(name, payload);
+        } else {
+          window.umami.track(name);
+        }
+      } catch (_) {
+        // no-op
+      }
+    }
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -316,11 +356,26 @@
         const data = await res.json();
         if (!res.ok) {
           result.textContent = data.error || '上传失败';
+          trackEvent('admin_upload_result', {
+            status: 'api_error',
+            success: 0,
+            failed: 0
+          });
           return;
         }
         result.textContent = `完成：成功 ${data.success}，失败 ${data.failed}`;
+        trackEvent('admin_upload_result', {
+          status: 'ok',
+          success: Number(data.success || 0),
+          failed: Number(data.failed || 0)
+        });
       } catch (err) {
         result.textContent = '上传失败';
+        trackEvent('admin_upload_result', {
+          status: 'network_error',
+          success: 0,
+          failed: 0
+        });
       }
     });
 

@@ -3,6 +3,7 @@
   const API_BASE = apiBase.replace(/\/$/, "");
   const MODE = (document.body.dataset.mode || "gallery").toLowerCase();
   const LIST_ENDPOINT = MODE === "favorites" ? "/api/favorites" : "/api/posts";
+  const analytics = initAnalytics();
 
   const masonryInstances = {};
   const state = {
@@ -15,6 +16,44 @@
 
   const segButtons = Array.prototype.slice.call(document.querySelectorAll('.seg-btn'));
   const segIndicator = document.querySelector('.seg-indicator');
+
+  function readUmamiConfig() {
+    const host = (document.body.dataset.umamiHost || '').trim().replace(/\/$/, '');
+    const websiteId = (document.body.dataset.umamiWebsiteId || '').trim();
+    return { host, websiteId };
+  }
+
+  function initAnalytics() {
+    const cfg = readUmamiConfig();
+    if (!cfg.host || !cfg.websiteId) {
+      return { enabled: false };
+    }
+
+    if (!window.umami && !document.querySelector('script[data-umami-loader="1"]')) {
+      const script = document.createElement('script');
+      script.defer = true;
+      script.src = cfg.host + '/script.js';
+      script.setAttribute('data-website-id', cfg.websiteId);
+      script.setAttribute('data-umami-loader', '1');
+      document.head.appendChild(script);
+    }
+
+    return { enabled: true };
+  }
+
+  function trackEvent(name, payload) {
+    if (!analytics.enabled) return;
+    if (!window.umami || typeof window.umami.track !== 'function') return;
+    try {
+      if (payload && Object.keys(payload).length > 0) {
+        window.umami.track(name, payload);
+      } else {
+        window.umami.track(name);
+      }
+    } catch (_) {
+      // no-op
+    }
+  }
 
   function setActiveButton(type) {
     const idx = segButtons.findIndex(btn => btn.dataset.type === type);
@@ -188,6 +227,13 @@
     link.setAttribute('data-thumb', displayURL);
     link.setAttribute('href', lightboxURL);
     link.setAttribute('data-caption', (item.title || 'Untitled') + ' · ' + (item.artist_name || ''));
+    link.addEventListener('click', function() {
+      trackEvent('image_open', {
+        mode: MODE,
+        segment: type,
+        source: item.source || ''
+      });
+    });
 
     const ratio = document.createElement('div');
     ratio.className = 'ratio-box';
@@ -245,12 +291,26 @@
       origin.target = '_blank';
       origin.rel = 'noopener';
       origin.innerHTML = svgLink();
+      origin.addEventListener('click', function() {
+        trackEvent('source_click', {
+          mode: MODE,
+          segment: type,
+          source: item.source || ''
+        });
+      });
       actions.appendChild(origin);
     }
 
     const download = document.createElement('a');
     download.href = downloadURL;
     download.innerHTML = svgDownload();
+    download.addEventListener('click', function() {
+      trackEvent('download_click', {
+        mode: MODE,
+        segment: type,
+        source: item.source || ''
+      });
+    });
     actions.appendChild(download);
 
     overlay.appendChild(meta);
@@ -318,7 +378,8 @@
     fetchBatch(activeType);
   }
 
-  function filterGallery(type) {
+  function filterGallery(type, trigger) {
+    const prevType = activeType;
     activeType = type;
     setActiveButton(type);
 
@@ -331,6 +392,13 @@
     });
 
     fetchBatch(type);
+
+    if (trigger === 'segmented' && prevType !== type) {
+      trackEvent('filter_switch', {
+        mode: MODE,
+        type: type
+      });
+    }
 
     setTimeout(() => {
       Object.keys(masonryInstances).forEach(k => masonryInstances[k].layout());
@@ -361,7 +429,7 @@
 
     segButtons.forEach(btn => {
       btn.addEventListener('click', function() {
-        filterGallery(btn.dataset.type);
+        filterGallery(btn.dataset.type, 'segmented');
       });
     });
 
@@ -370,7 +438,7 @@
     });
 
     setActiveButton(activeType);
-    filterGallery(activeType);
+    filterGallery(activeType, 'init');
     window.addEventListener('scroll', maybeLoadMore, { passive: true });
   });
 })();

@@ -193,6 +193,22 @@ Typical setup:
 - Backend on Zeabur (for example: `pic.mtcacg.top`)
 - Frontend static on EdgeOne/Pages (for example: `tyr.mtcacg.top`)
 
+## Umami Analytics (optional)
+
+Integrated frontend events:
+- `filter_switch`
+- `image_open`
+- `source_click`
+- `download_click`
+- `admin_upload_result`
+
+Set your Umami website id in these files:
+- `web/gallery.html` -> `data-umami-website-id`
+- `web/favorites.html` -> `data-umami-website-id`
+- `web/admin/upload.html` -> `data-umami-website-id`
+
+Current Umami host is preset to `https://umamii.zeabur.app`.
+
 If Zeabur fails pulling GHCR image (401):
 - Make package public, or
 - Configure GHCR credentials in Zeabur
