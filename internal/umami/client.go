@@ -117,8 +117,9 @@ func (c *Client) GetSummary(ctx context.Context) (*Summary, error) {
 
 func (c *Client) fetchSummary(ctx context.Context) (*Summary, error) {
 	now := time.Now().UTC()
-	start := now.AddDate(0, 0, -c.lookback).Unix()
-	end := now.Unix()
+	// Umami expects startAt/endAt in milliseconds.
+	start := now.AddDate(0, 0, -c.lookback).UnixMilli()
+	end := now.UnixMilli()
 
 	statsPath := fmt.Sprintf("/api/websites/%s/stats?startAt=%d&endAt=%d", url.PathEscape(c.websiteID), start, end)
 	var statsResp struct {
