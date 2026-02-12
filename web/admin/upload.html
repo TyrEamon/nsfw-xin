@@ -232,9 +232,43 @@
       text-decoration: none;
       word-break: break-all;
     }
+    .stats-card {
+      margin-top: 16px;
+    }
+    .stats-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .stats-title {
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .stats-frame-wrap {
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: rgba(0,0,0,0.03);
+    }
+    .stats-frame {
+      width: 100%;
+      height: 520px;
+      border: 0;
+      display: block;
+      background: transparent;
+    }
+    .stats-empty {
+      padding: 14px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
   </style>
 </head>
-<body data-umami-host="https://umamii.zeabur.app" data-umami-website-id="f64b3794-0fe6-4436-bf85-d3c52fb1dad5">
+<body data-umami-host="https://umamii.zeabur.app" data-umami-website-id="f64b3794-0fe6-4436-bf85-d3c52fb1dad5" data-umami-share-url="">
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand">
@@ -258,8 +292,22 @@
       <div class="result" id="result"></div>
     </div>
 
+    <div class="card stats-card">
+      <div class="stats-header">
+        <div>
+          <div class="stats-title">访问统计（tyr.mtcacg.top）</div>
+          <div class="muted">这里展示前台站点的 Umami 只读面板。</div>
+        </div>
+        <a class="btn" id="umami-open-link" href="#" target="_blank" rel="noopener" style="text-decoration:none;display:none;">新窗口打开</a>
+      </div>
+      <div class="stats-frame-wrap">
+        <iframe id="umami-share-frame" class="stats-frame" title="umami stats" loading="lazy" referrerpolicy="no-referrer"></iframe>
+        <div id="umami-share-empty" class="stats-empty">未配置 Umami 分享链接。请在本页 <code>data-umami-share-url</code> 填入 tyr 站点的 share URL。</div>
+      </div>
+    </div>
+
     <div class="card tips-card">
-      <div class="tips-title">随机图 API 小Tips</div>
+      <div class="tips-title">随机图 API ：</div>
       <ul class="tips-list">
         <li><a href="https://pic.mtcacg.top/api/random" target="_blank" rel="noopener">https://pic.mtcacg.top/api/random</a>（随机一张）</li>
         <li><a href="https://pic.mtcacg.top/api/random?type=h" target="_blank" rel="noopener">https://pic.mtcacg.top/api/random?type=h</a>（随机横图）</li>
@@ -341,6 +389,27 @@
       } catch (_) {
         // no-op
       }
+    }
+
+    function initUmamiSharePanel() {
+      const shareUrl = (document.body.dataset.umamiShareUrl || '').trim();
+      const frame = document.getElementById('umami-share-frame');
+      const empty = document.getElementById('umami-share-empty');
+      const link = document.getElementById('umami-open-link');
+      if (!frame || !empty || !link) return;
+
+      if (!shareUrl) {
+        frame.style.display = 'none';
+        empty.style.display = 'block';
+        link.style.display = 'none';
+        return;
+      }
+
+      frame.src = shareUrl;
+      frame.style.display = 'block';
+      empty.style.display = 'none';
+      link.href = shareUrl;
+      link.style.display = 'inline-flex';
     }
 
     form.addEventListener('submit', async (e) => {
@@ -506,6 +575,7 @@
     refreshBtn.addEventListener('click', resetAndReload);
     statusFilter.addEventListener('change', resetAndReload);
 
+    initUmamiSharePanel();
     resetAndReload();
   </script>
 </body>
