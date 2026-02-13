@@ -1,4 +1,4 @@
-﻿(() => {
+(() => {
   const apiBase = document.body.dataset.apiBase || "";
   const API_BASE = apiBase.replace(/\/$/, "");
   const MODE = (document.body.dataset.mode || "gallery").toLowerCase();
@@ -207,6 +207,18 @@
       '</svg>';
   }
 
+  function buildArtistProfileURL(item) {
+    const artistId = String(item.artist_id || '').trim();
+    if (!artistId || artistId === 'none') return '';
+
+    const source = String(item.source || '').toLowerCase();
+    if (source === 'twitter') {
+      return 'https://x.com/' + artistId.replace(/^@+/, '');
+    }
+
+    return 'https://www.pixiv.net/users/' + artistId;
+  }
+
   function createItem(item, type, idx) {
     const blankPixel = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
     const pad = (item.height && item.width) ? (item.height / item.width * 100).toFixed(2) : 56.25;
@@ -226,7 +238,7 @@
     link.setAttribute('data-fancybox', 'group-' + type);
     link.setAttribute('data-thumb', displayURL);
     link.setAttribute('href', lightboxURL);
-    link.setAttribute('data-caption', (item.title || 'Untitled') + ' · ' + (item.artist_name || ''));
+    link.setAttribute('data-caption', (item.title || 'Untitled') + ' - ' + (item.artist_name || ''));
     link.addEventListener('click', function() {
       trackEvent('image_open', {
         mode: MODE,
@@ -269,9 +281,10 @@
     if (item.artist_name) {
       const artist = document.createElement('div');
       artist.className = 'card-artist';
-      if (item.artist_id && item.artist_id !== 'none') {
+      const artistURL = buildArtistProfileURL(item);
+      if (artistURL) {
         const link = document.createElement('a');
-        link.href = 'https://www.pixiv.net/users/' + item.artist_id;
+        link.href = artistURL;
         link.target = '_blank';
         link.rel = 'noopener';
         link.textContent = item.artist_name;

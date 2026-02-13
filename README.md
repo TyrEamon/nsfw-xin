@@ -5,7 +5,7 @@ Xin is a Go-based illustration gallery system.
 It ingests images from:
 - Pixiv bookmarks
 - Telegram bot messages (photo/document)
-- Telegram links (Pixiv artwork links and yande.re post links)
+- Telegram links (Pixiv artwork links, yande.re post links, and X/Twitter status links)
 
 It stores:
 - Image files in a Telegram channel (via file_id)
@@ -53,6 +53,7 @@ Core components:
 Supported links:
 - Pixiv artwork: `https://www.pixiv.net/artworks/<id>`
 - yande.re post: `https://yande.re/post/show/<id>`
+- X/Twitter status: `https://x.com/<user>/status/<id>`
 
 Behavior:
 - Pixiv link: use Pixiv title/artist/artist_id
@@ -61,6 +62,7 @@ Behavior:
   - `artist_name = Arts`
   - `artist_id = none`
   - `source_url = original yande.re link`
+- X/Twitter link: use tweet text as title (first line), author display name as `artist_name`, and author username as `artist_id`
 - Max links per message: 3
 
 ### 4) Admin management
@@ -119,6 +121,7 @@ Pixiv:
 
 Server:
 - `LISTEN_ADDR` (default `:8080`)
+- `TWITTER_API_DOMAIN` (optional, default `fxtwitter.com`)
 - `UMAMI_BASE_URL` (optional, e.g. `https://umamii.zeabur.app`)
 - `UMAMI_WEBSITE_ID_FRONTEND` (optional, Umami website id for `tyr.mtcacg.top`)
 - `UMAMI_LOOKBACK_DAYS` (optional, default `7`)
@@ -251,4 +254,3 @@ If Telegram bot reports `409 terminated by other getUpdates request`:
 
 - Never expose `BOT_TOKEN` in logs/screenshots.
 - If leaked, regenerate token immediately in BotFather and update env.
-

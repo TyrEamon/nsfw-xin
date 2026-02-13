@@ -10,6 +10,7 @@ type Config struct {
 	BotToken                 string
 	ChannelID                int64
 	AdminPassword            string
+	TwitterAPIDomain         string
 	UmamiBaseURL             string
 	UmamiWebsiteIDFrontend   string
 	UmamiUsername            string
@@ -36,6 +37,7 @@ func Load() *Config {
 	cfg := &Config{
 		BotToken:                 os.Getenv("BOT_TOKEN"),
 		AdminPassword:            os.Getenv("ADMIN_PASSWORD"),
+		TwitterAPIDomain:         getEnvString("TWITTER_API_DOMAIN", "fxtwitter.com"),
 		UmamiBaseURL:             getEnvString("UMAMI_BASE_URL", ""),
 		UmamiWebsiteIDFrontend:   os.Getenv("UMAMI_WEBSITE_ID_FRONTEND"),
 		UmamiUsername:            os.Getenv("UMAMI_USERNAME"),
