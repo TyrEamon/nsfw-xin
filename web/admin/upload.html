@@ -135,6 +135,23 @@
       font-size: 1.1rem;
       font-weight: 700;
     }
+    .manage-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .count-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--glass-border);
+      background: rgba(0,0,0,0.04);
+      font-size: 0.78rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
     .manage-actions {
       display: flex;
       gap: 10px;
@@ -290,9 +307,71 @@
       color: var(--muted);
       font-size: 0.82rem;
     }
+    .backup-card {
+      margin-top: 16px;
+    }
+    .backup-actions {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .backup-actions .btn {
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 0.86rem;
+    }
+    .backup-limit {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 0.86rem;
+      border: 1px solid var(--glass-border);
+      border-radius: 10px;
+      background: rgba(0,0,0,0.03);
+      padding: 6px 8px;
+    }
+    .backup-limit input {
+      width: 84px;
+      border: 1px solid var(--glass-border);
+      border-radius: 8px;
+      background: var(--card-bg);
+      color: var(--text);
+      padding: 4px 6px;
+      font-size: 0.86rem;
+    }
+    .backup-grid {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(90px, 1fr));
+      gap: 8px;
+    }
+    .backup-box {
+      border: 1px solid var(--glass-border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: rgba(0,0,0,0.03);
+    }
+    .backup-box .label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      margin-bottom: 2px;
+    }
+    .backup-box .value {
+      font-size: 1rem;
+      font-weight: 700;
+    }
     @media (max-width: 640px) {
       .stats-grid {
         grid-template-columns: 1fr;
+      }
+      .backup-grid {
+        grid-template-columns: repeat(2, minmax(110px, 1fr));
+      }
+      .backup-actions .btn {
+        flex: 1 1 auto;
       }
     }
   </style>
@@ -360,10 +439,39 @@
       </ul>
     </div>
 
+    <div class="card backup-card">
+      <div class="stats-header">
+        <div>
+          <div class="stats-title">备份中心（OpenList / WebDAV）</div>
+          <div class="muted">历史补录只负责入队；TG 上传/爬虫新图会自动入队备份。</div>
+        </div>
+      </div>
+      <div class="backup-actions">
+        <label class="backup-limit">
+          batch limit
+          <input id="backup-limit" type="number" min="1" max="5000" step="1" value="1000">
+        </label>
+        <button class="btn" type="button" id="backup-health-btn">健康检查</button>
+        <button class="btn" type="button" id="backup-backfill-btn">Backfill(batch)</button>
+        <button class="btn" type="button" id="backup-backfill-all-btn">一键全补</button>
+        <button class="btn" type="button" id="backup-retry-btn">重试失败</button>
+        <button class="btn" type="button" id="backup-refresh-btn">刷新进度</button>
+      </div>
+      <div class="backup-grid">
+        <div class="backup-box"><div class="label">pending</div><div class="value" id="backup-pending">-</div></div>
+        <div class="backup-box"><div class="label">processing</div><div class="value" id="backup-processing">-</div></div>
+        <div class="backup-box"><div class="label">synced</div><div class="value" id="backup-synced">-</div></div>
+        <div class="backup-box"><div class="label">failed</div><div class="value" id="backup-failed">-</div></div>
+        <div class="backup-box"><div class="label">in_flight</div><div class="value" id="backup-inflight">-</div></div>
+      </div>
+      <div class="stats-note" id="backup-updated"></div>
+      <div class="result" id="backup-result"></div>
+    </div>
+
     <div class="card" style="margin-top:16px;">
       <div class="manage-header">
         <div>
-          <div class="manage-title">图片管理</div>
+          <div class="manage-title-row"><div class="manage-title">图片管理</div><span class="count-badge" id="manage-count-all">总数 -</span></div>
           <div class="muted">缩略图预览，支持收藏和隐藏（隐藏会加入黑名单，防止爬虫回灌）。</div>
         </div>
         <div class="manage-actions">
@@ -388,13 +496,27 @@
     const result = document.getElementById('result');
     const grid = document.getElementById('thumb-grid');
     const manageResult = document.getElementById('manage-result');
+    const manageCountAll = document.getElementById('manage-count-all');
     const statusFilter = document.getElementById('status-filter');
     const loadMoreBtn = document.getElementById('load-more-btn');
     const refreshBtn = document.getElementById('refresh-btn');
+
+    const backupResult = document.getElementById('backup-result');
+    const backupUpdated = document.getElementById('backup-updated');
+    const backupLimitInput = document.getElementById('backup-limit');
+    const backupHealthBtn = document.getElementById('backup-health-btn');
+    const backupBackfillBtn = document.getElementById('backup-backfill-btn');
+    const backupBackfillAllBtn = document.getElementById('backup-backfill-all-btn');
+    const backupRetryBtn = document.getElementById('backup-retry-btn');
+    const backupRefreshBtn = document.getElementById('backup-refresh-btn');
+
     const PAGE_SIZE = 72;
+    const BACKFILL_LIMIT_DEFAULT = 1000;
+    const BACKFILL_LIMIT_MAX = 5000;
     let offset = 0;
     let done = false;
     let loading = false;
+    let backfillAllRunning = false;
     const analytics = initAnalytics();
 
     function readUmamiConfig() {
@@ -447,6 +569,155 @@
 
     function formatNumber(v) {
       return Number(v || 0).toLocaleString('zh-CN');
+    }
+
+    function normalizeBackfillLimit() {
+      const raw = Number((backupLimitInput && backupLimitInput.value) || BACKFILL_LIMIT_DEFAULT);
+      let value = Number.isFinite(raw) ? Math.floor(raw) : BACKFILL_LIMIT_DEFAULT;
+      if (value <= 0) value = BACKFILL_LIMIT_DEFAULT;
+      if (value > BACKFILL_LIMIT_MAX) value = BACKFILL_LIMIT_MAX;
+      if (backupLimitInput) backupLimitInput.value = String(value);
+      return value;
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function requestJSON(url, options) {
+      const res = await fetch(url, Object.assign({
+        credentials: 'include',
+        cache: 'no-store'
+      }, options || {}));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      return data;
+    }
+
+    function renderBackupStats(data) {
+      const pendingEl = document.getElementById('backup-pending');
+      const processingEl = document.getElementById('backup-processing');
+      const syncedEl = document.getElementById('backup-synced');
+      const failedEl = document.getElementById('backup-failed');
+      const inflightEl = document.getElementById('backup-inflight');
+
+      if (pendingEl) pendingEl.textContent = formatNumber(data.pending);
+      if (processingEl) processingEl.textContent = formatNumber(data.processing);
+      if (syncedEl) syncedEl.textContent = formatNumber(data.synced);
+      if (failedEl) failedEl.textContent = formatNumber(data.failed);
+      if (inflightEl) inflightEl.textContent = formatNumber(data.in_flight);
+
+      const ts = Number(data.updated_at || 0);
+      if (backupUpdated) {
+        backupUpdated.textContent = ts > 0 ? `\u66f4\u65b0\uff1a${new Date(ts * 1000).toLocaleString('zh-CN')}` : '';
+      }
+    }
+
+    async function loadBackupStats(showError) {
+      if (!backupResult) return;
+      try {
+        const data = await requestJSON('/admin/api/backup/stats');
+        renderBackupStats(data);
+        if (showError === true) {
+          backupResult.textContent = '';
+        }
+      } catch (err) {
+        if (showError !== false) {
+          backupResult.textContent = err.message || 'backup stats error';
+        }
+      }
+    }
+
+    async function loadImageCounts() {
+      if (!manageCountAll) return;
+      try {
+        const data = await requestJSON('/admin/api/images/count');
+        manageCountAll.textContent = `\u603b\u6570 ${formatNumber(data.all)}`;
+      } catch (_) {
+        manageCountAll.textContent = '\u603b\u6570 -';
+      }
+    }
+
+    function setBackfillAllState(running) {
+      backfillAllRunning = running;
+      if (!backupBackfillAllBtn) return;
+      backupBackfillAllBtn.textContent = running ? '\u505c\u6b62\u5168\u8865' : '\u4e00\u952e\u5168\u8865';
+    }
+
+    async function runBackupHealth() {
+      if (!backupResult) return;
+      try {
+        const data = await requestJSON('/admin/api/backup/health?probe=1');
+        const status = (data && data.status) ? String(data.status) : 'unknown';
+        const lastError = (data && data.last_error) ? `, ${data.last_error}` : '';
+        backupResult.textContent = `health: ${status}${lastError}`;
+        await loadBackupStats(false);
+      } catch (err) {
+        backupResult.textContent = err.message || 'health check failed';
+      }
+    }
+
+    async function runBackupBackfill() {
+      if (!backupResult) return;
+      try {
+        const limit = normalizeBackfillLimit();
+        const data = await requestJSON(`/admin/api/backup/backfill?limit=${limit}`, { method: 'POST' });
+        backupResult.textContent = `backfill queued: ${formatNumber(data.queued)} (limit=${data.limit})`;
+        await loadBackupStats(false);
+      } catch (err) {
+        backupResult.textContent = err.message || 'backfill failed';
+      }
+    }
+
+    async function runBackupRetry() {
+      if (!backupResult) return;
+      try {
+        const limit = normalizeBackfillLimit();
+        const data = await requestJSON(`/admin/api/backup/retry-failed?limit=${limit}`, { method: 'POST' });
+        backupResult.textContent = `retry reset: ${formatNumber(data.reset)} (limit=${data.limit})`;
+        await loadBackupStats(false);
+      } catch (err) {
+        backupResult.textContent = err.message || 'retry failed';
+      }
+    }
+
+    async function runBackfillAll() {
+      if (!backupResult || !backupBackfillAllBtn) return;
+      if (backfillAllRunning) {
+        setBackfillAllState(false);
+        backupResult.textContent = 'stopping...';
+        return;
+      }
+
+      setBackfillAllState(true);
+      let rounds = 0;
+      let totalQueued = 0;
+
+      try {
+        while (backfillAllRunning) {
+          rounds += 1;
+          const limit = normalizeBackfillLimit();
+          const data = await requestJSON(`/admin/api/backup/backfill?limit=${limit}`, { method: 'POST' });
+          const queued = Number(data.queued || 0);
+          totalQueued += queued;
+          backupResult.textContent = `backfill round ${rounds}: queued ${formatNumber(queued)}, total ${formatNumber(totalQueued)}`;
+          await loadBackupStats(false);
+
+          if (queued <= 0) {
+            backupResult.textContent = `backfill done, total queued ${formatNumber(totalQueued)}`;
+            break;
+          }
+
+          await sleep(500);
+        }
+      } catch (err) {
+        backupResult.textContent = err.message || 'backfill all failed';
+      } finally {
+        setBackfillAllState(false);
+        await loadBackupStats(false);
+      }
     }
 
     function renderCountries(items) {
@@ -530,6 +801,8 @@
           success: Number(data.success || 0),
           failed: Number(data.failed || 0)
         });
+        await loadImageCounts();
+        await loadBackupStats(false);
       } catch (err) {
         result.textContent = '上传失败';
         trackEvent('admin_upload_result', {
@@ -613,6 +886,7 @@
           await postJSON('/admin/api/images/hide', { id: item.id, reason: 'admin_hide' });
           card.remove();
           manageResult.textContent = '已隐藏并加入黑名单';
+          await loadImageCounts();
         } catch (err) {
           manageResult.textContent = err.message || '删除失败';
         }
@@ -660,6 +934,7 @@
       offset = 0;
       done = false;
       grid.innerHTML = '';
+      loadImageCounts();
       loadImages(true);
     }
 
@@ -667,8 +942,16 @@
     refreshBtn.addEventListener('click', resetAndReload);
     statusFilter.addEventListener('change', resetAndReload);
 
+    if (backupHealthBtn) backupHealthBtn.addEventListener('click', runBackupHealth);
+    if (backupBackfillBtn) backupBackfillBtn.addEventListener('click', runBackupBackfill);
+    if (backupBackfillAllBtn) backupBackfillAllBtn.addEventListener('click', runBackfillAll);
+    if (backupRetryBtn) backupRetryBtn.addEventListener('click', runBackupRetry);
+    if (backupRefreshBtn) backupRefreshBtn.addEventListener('click', () => loadBackupStats(true));
+
     initUmamiLinkButton();
     loadUmamiSummary();
+    loadBackupStats(false);
+    loadImageCounts();
     resetAndReload();
   </script>
 </body>

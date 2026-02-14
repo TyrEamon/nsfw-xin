@@ -25,6 +25,12 @@ type Image struct {
 	CreatedAt  int64
 }
 
+type AdminImageCounts struct {
+	All    int64
+	Active int64
+	Hidden int64
+}
+
 type Client struct {
 	accountID string
 	apiToken  string
@@ -271,6 +277,27 @@ func (c *Client) ListAdminImages(ctx context.Context, offset, limit int, status 
 	sql += " ORDER BY i.created_at DESC LIMIT ? OFFSET ?"
 	params = append(params, limit, offset)
 	return c.exec(ctx, sql, params...)
+}
+
+func (c *Client) CountAdminImages(ctx context.Context) (AdminImageCounts, error) {
+	rows, err := c.exec(ctx, "SELECT status, COUNT(*) AS c FROM images GROUP BY status")
+	if err != nil {
+		return AdminImageCounts{}, err
+	}
+
+	counts := AdminImageCounts{}
+	for _, row := range rows {
+		status := strings.TrimSpace(rowString(row, "status"))
+		count := rowInt64(row, "c")
+		counts.All += count
+		switch status {
+		case "active":
+			counts.Active = count
+		case "hidden":
+			counts.Hidden = count
+		}
+	}
+	return counts, nil
 }
 
 func (c *Client) GetCrawlerState(ctx context.Context, key string) (string, bool, error) {

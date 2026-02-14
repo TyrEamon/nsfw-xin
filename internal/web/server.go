@@ -47,6 +47,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/admin", s.withAdminAuth(s.handleAdminRoot))
 	mux.HandleFunc("/admin/upload", s.withAdminAuth(s.handleAdminUpload))
 	mux.HandleFunc("/admin/api/images", s.withAdminAuth(s.handleAdminApiImages))
+	mux.HandleFunc("/admin/api/images/count", s.withAdminAuth(s.handleAdminApiImageCounts))
 	mux.HandleFunc("/admin/api/images/hide", s.withAdminAuth(s.handleAdminApiHideImage))
 	mux.HandleFunc("/admin/api/images/favorite", s.withAdminAuth(s.handleAdminApiFavorite))
 	mux.HandleFunc("/admin/api/umami/summary", s.withAdminAuth(s.handleAdminApiUmamiSummary))
@@ -245,6 +246,25 @@ func (s *Server) handleAdminApiImages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(items)
+}
+
+func (s *Server) handleAdminApiImageCounts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	counts, err := s.db.CountAdminImages(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{
+		"all":    counts.All,
+		"active": counts.Active,
+		"hidden": counts.Hidden,
+	})
 }
 
 func (s *Server) handleAdminApiHideImage(w http.ResponseWriter, r *http.Request) {
