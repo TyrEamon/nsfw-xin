@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"pixiv-tg-gallery/internal/app"
+	"pixiv-tg-gallery/internal/backup"
 	"pixiv-tg-gallery/internal/config"
 	"pixiv-tg-gallery/internal/database"
 	"pixiv-tg-gallery/internal/pixiv"
@@ -46,6 +47,20 @@ func main() {
 
 	pv := pixiv.New(cfg.PixivPHPSESSID, cfg.PixivUserID, cfg.PixivRest)
 	application := app.New(cfg, db, tg, pv)
+	backupSvc := backup.New(backup.Config{
+		Enabled:            cfg.BackupEnabled,
+		WebDAVURL:          cfg.BackupWebDAVURL,
+		WebDAVUsername:     cfg.BackupWebDAVUsername,
+		WebDAVPassword:     cfg.BackupWebDAVPassword,
+		BasePath:           cfg.BackupBasePath,
+		Workers:            cfg.BackupWorkers,
+		RetryMax:           cfg.BackupRetryMax,
+		PollSeconds:        cfg.BackupPollSeconds,
+		TaskTimeoutSeconds: cfg.BackupTaskTimeoutSeconds,
+	}, db, tg)
+	if cfg.BackupEnabled && !backupSvc.CanRun() {
+		log.Println("backup service enabled but not ready; check BACKUP_WEBDAV_* config")
+	}
 	um := umami.New(umami.Config{
 		BaseURL:      cfg.UmamiBaseURL,
 		WebsiteID:    cfg.UmamiWebsiteIDFrontend,
@@ -90,9 +105,10 @@ func main() {
 	defer stop()
 
 	application.StartPixivCrawler(ctx)
+	backupSvc.Start(ctx)
 
 	mux := http.NewServeMux()
-	server := web.New(cfg, db, tg, application, um)
+	server := web.New(cfg, db, tg, application, um, backupSvc)
 	server.Register(mux)
 
 	httpSrv := &http.Server{Addr: cfg.ListenAddr, Handler: mux}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"pixiv-tg-gallery/internal/app"
+	"pixiv-tg-gallery/internal/backup"
 	"pixiv-tg-gallery/internal/config"
 	"pixiv-tg-gallery/internal/database"
 	"pixiv-tg-gallery/internal/telegram"
@@ -21,15 +22,16 @@ import (
 )
 
 type Server struct {
-	cfg   *config.Config
-	db    *database.Client
-	tg    *telegram.Client
-	app   *app.App
-	umami *umami.Client
+	cfg    *config.Config
+	db     *database.Client
+	tg     *telegram.Client
+	app    *app.App
+	umami  *umami.Client
+	backup *backup.Service
 }
 
-func New(cfg *config.Config, db *database.Client, tg *telegram.Client, app *app.App, um *umami.Client) *Server {
-	return &Server{cfg: cfg, db: db, tg: tg, app: app, umami: um}
+func New(cfg *config.Config, db *database.Client, tg *telegram.Client, app *app.App, um *umami.Client, bk *backup.Service) *Server {
+	return &Server{cfg: cfg, db: db, tg: tg, app: app, umami: um, backup: bk}
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -48,6 +50,10 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/images/hide", s.withAdminAuth(s.handleAdminApiHideImage))
 	mux.HandleFunc("/admin/api/images/favorite", s.withAdminAuth(s.handleAdminApiFavorite))
 	mux.HandleFunc("/admin/api/umami/summary", s.withAdminAuth(s.handleAdminApiUmamiSummary))
+	mux.HandleFunc("/admin/api/backup/health", s.withAdminAuth(s.handleAdminApiBackupHealth))
+	mux.HandleFunc("/admin/api/backup/stats", s.withAdminAuth(s.handleAdminApiBackupStats))
+	mux.HandleFunc("/admin/api/backup/backfill", s.withAdminAuth(s.handleAdminApiBackupBackfill))
+	mux.HandleFunc("/admin/api/backup/retry-failed", s.withAdminAuth(s.handleAdminApiBackupRetryFailed))
 
 	mux.Handle("/lib/", http.FileServer(http.Dir(filepath.Join("web"))))
 }
@@ -325,6 +331,90 @@ func (s *Server) handleAdminApiUmamiSummary(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, summary)
 }
 
+func (s *Server) handleAdminApiBackupHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if s.backup == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"enabled": false,
+			"status":  "disabled",
+		})
+		return
+	}
+
+	probe := r.URL.Query().Get("probe") == "1"
+	writeJSON(w, http.StatusOK, s.backup.Health(r.Context(), probe))
+}
+
+func (s *Server) handleAdminApiBackupStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if s.backup == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"enabled": false,
+			"running": false,
+		})
+		return
+	}
+
+	stats, err := s.backup.Stats(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+func (s *Server) handleAdminApiBackupBackfill(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if s.backup == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "backup service unavailable"})
+		return
+	}
+
+	limit := parsePositiveLimit(r.URL.Query().Get("limit"), 1000, 5000)
+	queued, err := s.backup.Backfill(r.Context(), limit)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "queued": queued, "limit": limit})
+}
+
+func (s *Server) handleAdminApiBackupRetryFailed(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	if s.backup == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "backup service unavailable"})
+		return
+	}
+
+	limit := parsePositiveLimit(r.URL.Query().Get("limit"), 500, 5000)
+	reset, err := s.backup.RetryFailed(r.Context(), limit)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "reset": reset, "limit": limit})
+}
+
 func (s *Server) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
@@ -393,6 +483,23 @@ func (s *Server) withAdminAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+func parsePositiveLimit(raw string, defaultVal, maxVal int) int {
+	if defaultVal <= 0 {
+		defaultVal = 1
+	}
+	if maxVal < defaultVal {
+		maxVal = defaultVal
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || v <= 0 {
+		return defaultVal
+	}
+	if v > maxVal {
+		return maxVal
+	}
+	return v
 }
 
 func parseBasicAuth(header string) (string, string, bool) {

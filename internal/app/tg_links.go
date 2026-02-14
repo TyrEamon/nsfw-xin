@@ -291,6 +291,7 @@ func (a *App) ingestYandeFromLink(ctx context.Context, item supportedLink) (*TGI
 	if err := a.DB.InsertImage(ctx, img); err != nil {
 		return nil, err
 	}
+	a.enqueueBackup(ctx, img.ID)
 
 	return &TGIngestResult{
 		ID:        imgID,
@@ -403,6 +404,7 @@ func (a *App) ingestTwitterTweet(ctx context.Context, tweetID, sourceURL string)
 			stats.Failed++
 			log.Printf("Twitter d1 insert failed pid=%s err=%v", pid, err)
 		} else {
+			a.enqueueBackup(ctx, img.ID)
 			stats.Downloaded++
 			if stats.FirstID == "" {
 				stats.FirstID = pid
@@ -493,6 +495,7 @@ func (a *App) ingestPixivArtwork(ctx context.Context, id string, sourceURL strin
 			stats.Failed++
 			log.Printf("Pixiv d1 insert failed pid=%s err=%v", pid, err)
 		} else {
+			a.enqueueBackup(ctx, img.ID)
 			stats.Downloaded++
 			if stats.FirstID == "" {
 				stats.FirstID = pid

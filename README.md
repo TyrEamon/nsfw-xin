@@ -91,6 +91,14 @@ Behavior:
 - `/api/random?format=redirect`
 - Intentionally removes `origin_id` in response
 
+### 8) Async backup to OpenList WebDAV (optional)
+- TG remains primary storage
+- Backup worker pulls from TG and uploads to WebDAV/OneDrive
+- Default path split:
+  - `/MyPixiv/preview/...`
+  - `/MyPixiv/origin/...`
+- Non-blocking by design: ingest succeeds first, backup runs in background
+
 ## Requirements
 
 - Go 1.21+
@@ -127,6 +135,17 @@ Server:
 - `UMAMI_LOOKBACK_DAYS` (optional, default `7`)
 - `UMAMI_API_TOKEN` (optional, static token mode)
 - `UMAMI_USERNAME` + `UMAMI_PASSWORD` (optional, auto-login mode; recommended)
+
+Backup (optional):
+- `BACKUP_ENABLED` (`true/false`, default `false`)
+- `BACKUP_WEBDAV_URL` (e.g. `https://your-openlist.example.com/dav/`)
+- `BACKUP_WEBDAV_USERNAME`
+- `BACKUP_WEBDAV_PASSWORD`
+- `BACKUP_BASE_PATH` (default `/MyPixiv`)
+- `BACKUP_WORKERS` (default `1`)
+- `BACKUP_RETRY_MAX` (default `5`)
+- `BACKUP_POLL_SECONDS` (default `8`)
+- `BACKUP_TASK_TIMEOUT_SECONDS` (default `120`)
 
 ## Bootstrap vs Incremental Crawl
 
@@ -185,6 +204,14 @@ Admin APIs (Basic Auth):
   - body: `{"id":"...", "on":true|false}`
 - `GET /admin/api/umami/summary`
   - returns: `visitors`, `visits`, `pageviews`, `countries`, `range_days`, `updated_at`
+- `GET /admin/api/backup/health?probe=1`
+  - returns backup health snapshot (`enabled`, `running`, `status`, `last_error`)
+- `GET /admin/api/backup/stats`
+  - returns backup counters (`pending`, `synced`, `failed`, `in_flight`)
+- `POST /admin/api/backup/backfill?limit=1000`
+  - enqueue historical images into backup queue
+- `POST /admin/api/backup/retry-failed?limit=500`
+  - reset failed backups to pending
 
 ## Database
 
@@ -200,6 +227,7 @@ Current logical tables:
 - `favorites`
 - `ingest_blocklist`
 - `crawler_state`
+- `image_backups`
 
 ## Deployment Notes
 

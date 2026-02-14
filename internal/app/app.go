@@ -63,7 +63,11 @@ func (a *App) HandleUpload(ctx context.Context, data []byte) error {
 		CreatedAt:  time.Now().Unix(),
 	}
 
-	return a.DB.InsertImage(ctx, img)
+	if err := a.DB.InsertImage(ctx, img); err != nil {
+		return err
+	}
+	a.enqueueBackup(ctx, img.ID)
+	return nil
 }
 
 func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGIngestResult, error) {
@@ -127,6 +131,7 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 	if err := a.DB.InsertImage(ctx, img); err != nil {
 		return nil, err
 	}
+	a.enqueueBackup(ctx, img.ID)
 
 	return &TGIngestResult{
 		ID:        img.ID,
@@ -316,6 +321,15 @@ func shouldStopPageLoop(page, offset, total, maxPages int) bool {
 		return true
 	}
 	return false
+}
+
+func (a *App) enqueueBackup(ctx context.Context, imageID string) {
+	if !a.Cfg.BackupEnabled || strings.TrimSpace(imageID) == "" {
+		return
+	}
+	if err := a.DB.EnqueueBackupTask(ctx, imageID); err != nil {
+		log.Printf("[BACKUP] enqueue failed image=%s err=%v", imageID, err)
+	}
 }
 
 func channelMessageLink(channelID int64, msgID int) string {
