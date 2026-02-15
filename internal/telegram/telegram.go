@@ -50,6 +50,11 @@ type SendResult struct {
 	Height          int
 }
 
+type DiscussionButtons struct {
+	DetailsURL string
+	OriginURL  string
+}
+
 func New(token string, publishChannelID, storageChannelID, discussionGroupID int64) (*Client, error) {
 	b, err := bot.New(token)
 	if err != nil {
@@ -173,13 +178,15 @@ func (c *Client) SendArtwork(ctx context.Context, data []byte, opts SendOptions)
 	return res, nil
 }
 
-func (c *Client) SendDiscussionComment(ctx context.Context, publishMessageID int, text string) (int, error) {
+func (c *Client) SendDiscussionComment(ctx context.Context, publishMessageID int, text string, buttons DiscussionButtons) (int, error) {
 	disablePreview := true
+	replyMarkup := buildDiscussionReplyMarkup(buttons)
+
 	msg, err := c.Bot.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          c.DiscussionGroupID,
 		MessageThreadID: publishMessageID,
 		Text:            text,
-		ParseMode:       models.ParseModeHTML,
+		ReplyMarkup:     replyMarkup,
 		LinkPreviewOptions: &models.LinkPreviewOptions{
 			IsDisabled: &disablePreview,
 		},
@@ -189,9 +196,9 @@ func (c *Client) SendDiscussionComment(ctx context.Context, publishMessageID int
 	}
 
 	fallback, fallbackErr := c.Bot.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:    c.DiscussionGroupID,
-		Text:      text,
-		ParseMode: models.ParseModeHTML,
+		ChatID:      c.DiscussionGroupID,
+		Text:        text,
+		ReplyMarkup: replyMarkup,
 		LinkPreviewOptions: &models.LinkPreviewOptions{
 			IsDisabled: &disablePreview,
 		},
@@ -200,6 +207,24 @@ func (c *Client) SendDiscussionComment(ctx context.Context, publishMessageID int
 		return 0, err
 	}
 	return fallback.ID, err
+}
+
+func buildDiscussionReplyMarkup(buttons DiscussionButtons) *models.InlineKeyboardMarkup {
+	rows := make([][]models.InlineKeyboardButton, 0, 1)
+	row := make([]models.InlineKeyboardButton, 0, 2)
+	if buttons.DetailsURL != "" {
+		row = append(row, models.InlineKeyboardButton{Text: "\u8be6\u60c5", URL: buttons.DetailsURL})
+	}
+	if buttons.OriginURL != "" {
+		row = append(row, models.InlineKeyboardButton{Text: "\u539f\u56fe", URL: buttons.OriginURL})
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 func detectImageFormat(data []byte) (image.Config, string) {

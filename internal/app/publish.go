@@ -35,15 +35,15 @@ func (a *App) publishImage(ctx context.Context, data []byte, meta imagePublishMe
 		return database.Image{}, err
 	}
 
-	if isNoneLike(meta.SourceURL) && result.StorageMsgID > 0 {
-		meta.SourceURL = channelMessageLink(a.Cfg.StorageChannelID, result.StorageMsgID)
-	}
-
 	discussionMsgID := 0
 	if a.Cfg.DiscussionGroupID != 0 {
-		comment := buildDiscussionComment(meta, a.Cfg.StorageChannelID, result.StorageMsgID)
+		comment := buildDiscussionComment(meta)
 		if comment != "" {
-			msgID, commentErr := a.TG.SendDiscussionComment(ctx, result.PublishMsgID, comment)
+			buttons := telegram.DiscussionButtons{
+				DetailsURL: channelMessageLink(a.Cfg.PublishChannelID, result.PublishMsgID),
+				OriginURL:  channelMessageLink(a.Cfg.StorageChannelID, result.StorageMsgID),
+			}
+			msgID, commentErr := a.TG.SendDiscussionComment(ctx, result.PublishMsgID, comment, buttons)
 			discussionMsgID = msgID
 			if commentErr != nil {
 				log.Printf("discussion comment warning id=%s publish_msg_id=%d err=%v", meta.ID, result.PublishMsgID, commentErr)
@@ -133,19 +133,22 @@ func buildPreviewCaption(meta imagePublishMeta) string {
 	return caption
 }
 
-func buildDiscussionComment(meta imagePublishMeta, storageChannelID int64, storageMsgID int) string {
-	if storageMsgID <= 0 {
-		return ""
+func buildDiscussionComment(meta imagePublishMeta) string {
+	lines := make([]string, 0, 2)
+	if shouldShowSourceLine(meta.Source) && !isNoneLike(meta.SourceURL) {
+		lines = append(lines, strings.TrimSpace(meta.SourceURL))
 	}
-	originURL := channelMessageLink(storageChannelID, storageMsgID)
-	lines := []string{
-		fmt.Sprintf("原图：<a href=\"%s\">点击查看</a>", html.EscapeString(originURL)),
-	}
-
-	if !isNoneLike(meta.SourceURL) {
-		lines = append(lines, fmt.Sprintf("原链接：<a href=\"%s\">%s</a>", html.EscapeString(meta.SourceURL), html.EscapeString(meta.SourceURL)))
-	}
+	lines = append(lines, "\u70b9\u51fb\u4e0b\u65b9\u6309\u94ae\u5728\u79c1\u804a\u4e2d\u83b7\u53d6\u539f\u56fe\u6587\u4ef6")
 	return strings.Join(lines, "\n")
+}
+
+func shouldShowSourceLine(source string) bool {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "pixiv", "twitter", "yande":
+		return true
+	default:
+		return false
+	}
 }
 
 func buildTagLine(tags string) string {
