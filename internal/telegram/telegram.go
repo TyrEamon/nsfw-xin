@@ -220,12 +220,67 @@ func (c *Client) SendPreviewPhoto(ctx context.Context, data []byte, caption stri
 	return res, nil
 }
 
+func (c *Client) SendPreviewMotion(ctx context.Context, data []byte, filename, caption string, asAnimation bool) (PreviewSendResult, error) {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		filename = "preview.mp4"
+	}
+
+	res := PreviewSendResult{}
+	if asAnimation {
+		publishMsg, err := c.Bot.SendAnimation(ctx, &bot.SendAnimationParams{
+			ChatID:     c.PublishChannelID,
+			Animation:  &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
+			Caption:    caption,
+			ParseMode:  models.ParseModeHTML,
+			HasSpoiler: c.GetPreviewHasSpoiler(),
+		})
+		if err != nil {
+			return PreviewSendResult{}, err
+		}
+		res.PublishMsgID = publishMsg.ID
+		if publishMsg.Animation != nil {
+			res.PreviewID = publishMsg.Animation.FileID
+			res.Width = publishMsg.Animation.Width
+			res.Height = publishMsg.Animation.Height
+		}
+		return res, nil
+	}
+
+	publishMsg, err := c.Bot.SendVideo(ctx, &bot.SendVideoParams{
+		ChatID:            c.PublishChannelID,
+		Video:             &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
+		Caption:           caption,
+		ParseMode:         models.ParseModeHTML,
+		HasSpoiler:        c.GetPreviewHasSpoiler(),
+		SupportsStreaming: true,
+	})
+	if err != nil {
+		return PreviewSendResult{}, err
+	}
+	res.PublishMsgID = publishMsg.ID
+	if publishMsg.Video != nil {
+		res.PreviewID = publishMsg.Video.FileID
+		res.Width = publishMsg.Video.Width
+		res.Height = publishMsg.Video.Height
+	}
+	return res, nil
+}
+
 func (c *Client) SendOriginDocument(ctx context.Context, data []byte, caption string) (string, int, error) {
 	_, format := detectImageFormat(data)
 	originName := "origin." + extFromFormat(format)
+	return c.SendOriginDocumentWithFilename(ctx, data, originName, caption)
+}
+
+func (c *Client) SendOriginDocumentWithFilename(ctx context.Context, data []byte, filename, caption string) (string, int, error) {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		filename = "origin.bin"
+	}
 	storageMsg, err := c.Bot.SendDocument(ctx, &bot.SendDocumentParams{
 		ChatID:   c.StorageChannelID,
-		Document: &models.InputFileUpload{Filename: originName, Data: bytes.NewReader(data)},
+		Document: &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
 		Caption:  caption,
 	})
 	if err != nil {

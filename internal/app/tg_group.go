@@ -69,7 +69,7 @@ func (a *App) handleTGGroupCommand(ctx context.Context, msg *models.Message, cmd
 		return nil, nil
 	}
 	if !a.isTGIngestAuthorized(msg) {
-		return &TGIngestResult{Summary: "No publish permission."}, nil
+		return &TGIngestResult{Summary: "\u54fc\uff0c\u8fd9\u4e2a\u529f\u80fd\u53ea\u7ed9\u4e3b\u4eba\u548c\u767d\u540d\u5355\u7528\u55b5~"}, nil
 	}
 
 	switch cmd {
@@ -83,9 +83,9 @@ func (a *App) handleTGGroupCommand(ctx context.Context, msg *models.Message, cmd
 		}
 		a.groupMu.Unlock()
 		if title == "" {
-			return &TGIngestResult{Summary: "Group mode on. Send images/files, then /final."}, nil
+			return &TGIngestResult{Summary: "\u597d\u5566\uff0c\u5df2\u8fdb\u5165\u7ec4\u56fe\u6a21\u5f0f\u55b5~\u628a\u56fe\u90fd\u53d1\u5b8c\u540e\u518d\u53d1 /final\u3002"}, nil
 		}
-		return &TGIngestResult{Summary: fmt.Sprintf("Group mode on. Title: %s", title)}, nil
+		return &TGIngestResult{Summary: fmt.Sprintf("\u52c9\u5f3a\u5e2e\u4f60\u8bb0\u4e0b\u6807\u9898\u5566\uff1a%s\n\u53d1\u5b8c\u8bb0\u5f97 /final \u55b5~", title)}, nil
 	case "/final":
 		return a.finalizeTGGroup(ctx, msg)
 	default:
@@ -118,7 +118,7 @@ func (a *App) appendTGGroupItem(msg *models.Message, fileID, title string) (bool
 		return false, 0, nil
 	}
 	if len(session.Items) >= maxTGGroupItems {
-		return true, len(session.Items), fmt.Errorf("group limit reached (%d)", maxTGGroupItems)
+		return true, len(session.Items), fmt.Errorf("\u7ec4\u56fe\u4e0a\u9650\u8fbe\u5230(%d)", maxTGGroupItems)
 	}
 
 	session.Items = append(session.Items, tgGroupItem{
@@ -151,10 +151,10 @@ func (a *App) finalizeTGGroup(ctx context.Context, msg *models.Message) (*TGInge
 	a.groupMu.Unlock()
 
 	if !ok {
-		return &TGIngestResult{Summary: "No active group. Use /group first."}, nil
+		return &TGIngestResult{Summary: "\u4f60\u90fd\u6ca1\u5f00\u7ec4\u56fe\u6a21\u5f0f\u5440\uff0c\u5148 /group \u518d\u8bf4\u55b5~"}, nil
 	}
 	if len(session.Items) == 0 {
-		return &TGIngestResult{Summary: "Group is empty. Nothing to publish."}, nil
+		return &TGIngestResult{Summary: "\u7ec4\u56fe\u91cc\u7a7a\u7a7a\u7684\uff0c\u81f3\u5c11\u53d1\u4e00\u5f20\u56fe\u518d /final \u55b5~"}, nil
 	}
 	if session.StartedAt <= 0 {
 		session.StartedAt = time.Now().Unix()
@@ -165,15 +165,15 @@ func (a *App) finalizeTGGroup(ctx context.Context, msg *models.Message) (*TGInge
 
 	stats, err := a.publishTGGroup(ctx, msg.Chat.ID, session)
 	if err != nil {
-		return &TGIngestResult{Summary: "Group publish failed: " + err.Error()}, nil
+		return &TGIngestResult{Summary: "\u7ec4\u56fe\u53d1\u5e03\u7ffb\u8f66\u4e86\u55b5\uff1a" + err.Error()}, nil
 	}
 	if stats.Downloaded == 0 {
-		return &TGIngestResult{Summary: fmt.Sprintf("Group done: +0, skipped %d, failed %d", stats.Skipped, stats.Failed)}, nil
+		return &TGIngestResult{Summary: fmt.Sprintf("\u7ec4\u56fe\u53d1\u5e03\u5b8c\u6210\u55b5~ \u65b0\u589e0\uff0c\u8df3\u8fc7%d\uff0c\u5931\u8d25%d", stats.Skipped, stats.Failed)}, nil
 	}
 	return &TGIngestResult{
 		ID:      stats.FirstID,
 		Title:   stats.Title,
-		Summary: fmt.Sprintf("Group done: +%d, skipped %d, failed %d", stats.Downloaded, stats.Skipped, stats.Failed),
+		Summary: fmt.Sprintf("\u7ec4\u56fe\u53d1\u5e03\u5b8c\u6210\u55b5~ \u65b0\u589e%d\uff0c\u8df3\u8fc7%d\uff0c\u5931\u8d25%d", stats.Downloaded, stats.Skipped, stats.Failed),
 	}, nil
 }
 

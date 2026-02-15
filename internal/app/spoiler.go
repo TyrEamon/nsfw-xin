@@ -47,19 +47,16 @@ func parseSpoilerCommand(text string) (action string, ok bool) {
 	if i := strings.Index(cmd, "@"); i > 0 {
 		cmd = cmd[:i]
 	}
-	if cmd != "/spoiler" {
-		return "", false
-	}
-	if len(fields) < 2 {
-		return "status", true
-	}
 
-	action = strings.ToLower(strings.TrimSpace(fields[1]))
-	switch action {
-	case "on", "off", "status":
-		return action, true
+	switch cmd {
+	case "/spoilerstatus":
+		return "status", true
+	case "/spoileron":
+		return "on", true
+	case "/spoileroff":
+		return "off", true
 	default:
-		return "help", true
+		return "", false
 	}
 }
 
@@ -68,7 +65,7 @@ func (a *App) handleSpoilerCommand(ctx context.Context, msg *models.Message, act
 		return nil, nil
 	}
 	if !a.isTGIngestAuthorized(msg) {
-		return &TGIngestResult{Summary: "No publish permission."}, nil
+		return &TGIngestResult{Summary: "\u54fc\uff0c\u8fd9\u4e2a\u529f\u80fd\u53ea\u7ed9\u4e3b\u4eba\u548c\u767d\u540d\u5355\u7528\u55b5~"}, nil
 	}
 
 	switch action {
@@ -78,19 +75,23 @@ func (a *App) handleSpoilerCommand(ctx context.Context, msg *models.Message, act
 		enabled := action == "on"
 		a.TG.SetPreviewHasSpoiler(enabled)
 		if err := a.DB.SetCrawlerState(ctx, tgSpoilerStateKey, boolToState(enabled)); err != nil {
-			return &TGIngestResult{Summary: fmt.Sprintf("Spoiler %s (memory only, db write failed)", action)}, nil
+			state := "off"
+			if enabled {
+				state = "on"
+			}
+			return &TGIngestResult{Summary: fmt.Sprintf("\u8ff7\u96fe\u5df2\u5207\u5230%s\u55b5~\uff08\u4f46\u5199\u5165D1\u5931\u8d25\uff0c\u4ec5\u672c\u6b21\u751f\u6548\uff09", state)}, nil
 		}
 		return &TGIngestResult{Summary: spoilerStatusText(enabled)}, nil
 	default:
-		return &TGIngestResult{Summary: "Usage: /spoiler on|off|status"}, nil
+		return &TGIngestResult{Summary: "\u7528\u6cd5\uff1a/spoilerstatus /spoileron /spoileroff"}, nil
 	}
 }
 
 func spoilerStatusText(enabled bool) string {
 	if enabled {
-		return "Spoiler is ON"
+		return "\u5f53\u524d\u8ff7\u96fe\u6a21\u5f0f\uff1a\u5f00\u542f\u55b5~"
 	}
-	return "Spoiler is OFF"
+	return "\u5f53\u524d\u8ff7\u96fe\u6a21\u5f0f\uff1a\u5173\u95ed\u55b5~"
 }
 
 func parseStateBool(v string) (bool, bool) {

@@ -341,12 +341,23 @@ func (a *App) ingestTwitterTweet(ctx context.Context, tweetID, sourceURL string)
 	}
 
 	photos := tweet.photoURLs()
-	if len(photos) == 0 {
-		return nil, fmt.Errorf("tweet has no photos")
+	motions := tweet.motionMedia()
+	if len(photos) == 0 && len(motions) == 0 {
+		return nil, fmt.Errorf("tweet has no media")
 	}
-	log.Printf("Twitter tweet fetched id=%s photos=%d", tweetID, len(photos))
+	log.Printf("Twitter tweet fetched id=%s photos=%d motions=%d", tweetID, len(photos), len(motions))
 
 	tags := strings.Join(extractHashTags(tweet.Text), " ")
+	baseMeta := imagePublishMeta{
+		Title:      title,
+		ArtistName: artistName,
+		ArtistID:   artistID,
+		SourceURL:  sourceURL,
+		SourceText: tweet.Text,
+		Source:     "twitter",
+		Tags:       tags,
+		CreatedAt:  time.Now().Unix(),
+	}
 	stats := &ingestStats{Title: title}
 
 	for i, rawURL := range photos {
@@ -370,17 +381,11 @@ func (a *App) ingestTwitterTweet(ctx context.Context, tweetID, sourceURL string)
 			continue
 		}
 
-		img, err := a.publishImage(ctx, imgData, imagePublishMeta{
-			ID:         pid,
-			Title:      title,
-			ArtistName: artistName,
-			ArtistID:   artistID,
-			SourceURL:  sourceURL,
-			SourceText: tweet.Text,
-			Source:     "twitter",
-			Tags:       tags,
-			CreatedAt:  time.Now().Unix(),
-		})
+		meta := baseMeta
+		meta.ID = pid
+		meta.CreatedAt = time.Now().Unix()
+
+		img, err := a.publishImage(ctx, imgData, meta)
 		if err != nil {
 			stats.Failed++
 			log.Printf("Twitter publish failed pid=%s err=%v", pid, err)
@@ -395,7 +400,56 @@ func (a *App) ingestTwitterTweet(ctx context.Context, tweetID, sourceURL string)
 		time.Sleep(1500 * time.Millisecond)
 	}
 
+	for i, item := range motions {
+		pid := fmt.Sprintf("twitter_%s_v%d", tweetID, i)
+		mediaURL := strings.TrimSpace(item.URL)
+		if mediaURL == "" {
+			stats.Failed++
+			log.Printf("Twitter media skip pid=%s reason=empty_url", pid)
+			continue
+		}
+
+		mediaData, err := downloadWithHeaders(ctx, mediaURL, "https://x.com/")
+		if err != nil {
+			stats.Failed++
+			log.Printf("Twitter media download failed pid=%s err=%v", pid, err)
+			continue
+		}
+
+		filename := buildTwitterMediaFilename(tweetID, i, item)
+		meta := baseMeta
+		meta.ID = ""
+		meta.CreatedAt = time.Now().Unix()
+		if err := a.publishTwitterMotionNoDB(ctx, mediaData, filename, item.isAnimation(), meta); err != nil {
+			stats.Failed++
+			log.Printf("Twitter media publish failed pid=%s err=%v", pid, err)
+		} else {
+			stats.Downloaded++
+			log.Printf("Twitter media published pid=%s animation=%t", pid, item.isAnimation())
+		}
+
+		time.Sleep(1500 * time.Millisecond)
+	}
+
 	return stats, nil
+}
+
+func (a *App) publishTwitterMotionNoDB(ctx context.Context, data []byte, filename string, asAnimation bool, meta imagePublishMeta) error {
+	meta = normalizePublishMeta(meta)
+
+	previewRes, err := a.TG.SendPreviewMotion(ctx, data, filename, buildPreviewCaption(meta), asAnimation)
+	if err != nil {
+		return err
+	}
+	_, storageMsgID, err := a.TG.SendOriginDocumentWithFilename(ctx, data, filename, "Original")
+	if err != nil {
+		return err
+	}
+
+	commentMeta := meta
+	commentMeta.ID = ""
+	a.sendDiscussionComment(ctx, commentMeta, previewRes.PublishMsgID, storageMsgID)
+	return nil
 }
 
 func (a *App) ingestPixivArtwork(ctx context.Context, id string, sourceURL string) (*ingestStats, error) {
@@ -547,19 +601,78 @@ type twitterAuthor struct {
 
 type twitterMedia struct {
 	Photos []twitterMediaItem `json:"photos"`
+	Videos []twitterMediaItem `json:"videos"`
+	All    []twitterMediaItem `json:"all"`
 }
 
 type twitterMediaItem struct {
-	URL string `json:"url"`
+	Type         string `json:"type"`
+	URL          string `json:"url"`
+	Format       string `json:"format,omitempty"`
+	ThumbnailURL string `json:"thumbnail_url,omitempty"`
 }
 
 func (t *twitterTweet) photoURLs() []string {
-	if t == nil || t.Media == nil || len(t.Media.Photos) == 0 {
+	if t == nil || t.Media == nil {
 		return nil
 	}
-	out := make([]string, 0, len(t.Media.Photos))
-	seen := make(map[string]struct{}, len(t.Media.Photos))
-	for _, item := range t.Media.Photos {
+	items := make([]twitterMediaItem, 0, len(t.Media.Photos)+len(t.Media.All))
+	items = append(items, t.Media.Photos...)
+	items = append(items, t.Media.All...)
+
+	return collectTwitterMediaURLs(items, func(item twitterMediaItem) bool {
+		mediaType := strings.ToLower(strings.TrimSpace(item.Type))
+		return mediaType == "" || mediaType == "photo"
+	})
+}
+
+func (t *twitterTweet) motionMedia() []twitterMediaItem {
+	if t == nil || t.Media == nil {
+		return nil
+	}
+	items := make([]twitterMediaItem, 0, len(t.Media.Videos)+len(t.Media.All))
+	items = append(items, t.Media.Videos...)
+	items = append(items, t.Media.All...)
+
+	out := make([]twitterMediaItem, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if !isTwitterMotionType(item.Type, item.Format, item.URL) {
+			continue
+		}
+		u := strings.TrimSpace(item.URL)
+		if u == "" {
+			continue
+		}
+		if _, ok := seen[u]; ok {
+			continue
+		}
+		seen[u] = struct{}{}
+		item.URL = u
+		out = append(out, item)
+	}
+	return out
+}
+
+func (m twitterMediaItem) isAnimation() bool {
+	mediaType := strings.ToLower(strings.TrimSpace(m.Type))
+	if mediaType == "gif" || mediaType == "animated_gif" {
+		return true
+	}
+	format := strings.ToLower(strings.TrimSpace(m.Format))
+	return strings.Contains(format, "gif")
+}
+
+func collectTwitterMediaURLs(items []twitterMediaItem, allow func(twitterMediaItem) bool) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if allow != nil && !allow(item) {
+			continue
+		}
 		u := strings.TrimSpace(item.URL)
 		if u == "" {
 			continue
@@ -571,6 +684,68 @@ func (t *twitterTweet) photoURLs() []string {
 		out = append(out, u)
 	}
 	return out
+}
+
+func isTwitterMotionType(mediaType, format, rawURL string) bool {
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	switch mediaType {
+	case "video", "gif", "animated_gif":
+		return true
+	case "photo":
+		return false
+	}
+
+	format = strings.ToLower(strings.TrimSpace(format))
+	if strings.Contains(format, "video") || strings.Contains(format, "gif") || strings.Contains(format, "mp4") || strings.Contains(format, "webm") {
+		return true
+	}
+
+	u, err := neturl.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(path.Ext(u.Path)) {
+	case ".mp4", ".mov", ".m4v", ".webm", ".gif":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildTwitterMediaFilename(tweetID string, index int, item twitterMediaItem) string {
+	ext := ""
+	raw := strings.TrimSpace(item.URL)
+	if raw != "" {
+		if u, err := neturl.Parse(raw); err == nil {
+			candidate := strings.ToLower(path.Ext(u.Path))
+			if isSupportedTwitterMediaExt(candidate) {
+				ext = candidate
+			}
+		}
+	}
+	if ext == "" {
+		format := strings.ToLower(strings.TrimSpace(item.Format))
+		switch {
+		case strings.Contains(format, "webm"):
+			ext = ".webm"
+		case strings.Contains(format, "mov"):
+			ext = ".mov"
+		case strings.Contains(format, "gif"):
+			ext = ".mp4"
+		default:
+			ext = ".mp4"
+		}
+	}
+	return fmt.Sprintf("twitter_%s_v%d%s", tweetID, index, ext)
+}
+
+func isSupportedTwitterMediaExt(ext string) bool {
+	switch ext {
+	case ".mp4", ".mov", ".m4v", ".webm", ".gif":
+		return true
+	default:
+		return false
+	}
 }
 
 func fetchTwitterTweet(ctx context.Context, domain, tweetID string) (*twitterTweet, error) {

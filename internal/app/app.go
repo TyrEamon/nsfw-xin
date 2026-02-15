@@ -113,14 +113,14 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 	}
 
 	if !a.isTGIngestAuthorized(msg) {
-		return &TGIngestResult{Summary: "No publish permission."}, nil
+		return &TGIngestResult{Summary: "\u54fc\uff0c\u8fd9\u4e2a\u529f\u80fd\u53ea\u7ed9\u4e3b\u4eba\u548c\u767d\u540d\u5355\u7528\u55b5~"}, nil
 	}
 
 	if fileID != "" {
 		if queued, count, err := a.appendTGGroupItem(msg, fileID, title); err != nil {
-			return &TGIngestResult{Summary: "Group queue failed: " + err.Error()}, nil
+			return &TGIngestResult{Summary: "\u6392\u961f\u5931\u8d25\u4e86\u55b5\uff1a" + err.Error()}, nil
 		} else if queued {
-			return &TGIngestResult{Summary: fmt.Sprintf("Group queued: %d", count)}, nil
+			return &TGIngestResult{Summary: fmt.Sprintf("\u6536\u5230\u7b2c %d \u5f20\u4e86\u55b5~", count)}, nil
 		}
 	}
 
@@ -151,7 +151,7 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 		ID:        img.ID,
 		Title:     img.Title,
 		SourceURL: img.SourceURL,
-		Summary:   fmt.Sprintf("Done meow~\nID: %s", img.ID),
+		Summary:   fmt.Sprintf("\u54fc\uff0c\u5904\u7406\u597d\u4e86\u55b5~\nID: %s", img.ID),
 	}, nil
 }
 
