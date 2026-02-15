@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -23,6 +24,16 @@ type BackupStats struct {
 	Synced     int64
 	Failed     int64
 	Total      int64
+}
+
+type BackupFailedItem struct {
+	ImageID    string `json:"image_id"`
+	Title      string `json:"title"`
+	Source     string `json:"source"`
+	SourceURL  string `json:"source_url"`
+	LastError  string `json:"last_error"`
+	RetryCount int    `json:"retry_count"`
+	UpdatedAt  int64  `json:"updated_at"`
 }
 
 func (c *Client) EnqueueBackupTask(ctx context.Context, imageID string) error {
@@ -195,6 +206,78 @@ SET status = 'failed',
     updated_at = ?
 WHERE image_id = ?
 `, lastError, now, imageID)
+	return err
+}
+
+func (c *Client) ListFailedBackupTasks(ctx context.Context, limit, offset int) ([]BackupFailedItem, int64, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	countRows, err := c.exec(ctx, "SELECT COUNT(*) AS c FROM image_backups WHERE status = 'failed'")
+	if err != nil {
+		return nil, 0, err
+	}
+	total := int64(0)
+	if len(countRows) > 0 {
+		total = rowInt64(countRows[0], "c")
+	}
+	if total == 0 {
+		return []BackupFailedItem{}, 0, nil
+	}
+
+	rows, err := c.exec(ctx, `
+SELECT
+  b.image_id,
+  COALESCE(i.title, '') AS title,
+  COALESCE(i.source, '') AS source,
+  COALESCE(i.source_url, '') AS source_url,
+  COALESCE(b.last_error, '') AS last_error,
+  b.retry_count,
+  b.updated_at
+FROM image_backups b
+LEFT JOIN images i ON i.id = b.image_id
+WHERE b.status = 'failed'
+ORDER BY b.updated_at DESC
+LIMIT ? OFFSET ?
+`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	items := make([]BackupFailedItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, BackupFailedItem{
+			ImageID:    rowString(row, "image_id"),
+			Title:      rowString(row, "title"),
+			Source:     rowString(row, "source"),
+			SourceURL:  rowString(row, "source_url"),
+			LastError:  rowString(row, "last_error"),
+			RetryCount: int(rowInt64(row, "retry_count")),
+			UpdatedAt:  rowInt64(row, "updated_at"),
+		})
+	}
+
+	return items, total, nil
+}
+
+func (c *Client) MarkBackupResolved(ctx context.Context, imageID string) error {
+	imageID = strings.TrimSpace(imageID)
+	if imageID == "" {
+		return nil
+	}
+	now := time.Now().Unix()
+	_, err := c.exec(ctx, `
+UPDATE image_backups
+SET status = 'synced',
+    last_error = NULL,
+    updated_at = ?
+WHERE image_id = ?
+  AND status = 'failed'
+`, now, imageID)
 	return err
 }
 

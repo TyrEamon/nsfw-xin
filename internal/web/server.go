@@ -55,6 +55,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/backup/stats", s.withAdminAuth(s.handleAdminApiBackupStats))
 	mux.HandleFunc("/admin/api/backup/backfill", s.withAdminAuth(s.handleAdminApiBackupBackfill))
 	mux.HandleFunc("/admin/api/backup/retry-failed", s.withAdminAuth(s.handleAdminApiBackupRetryFailed))
+	mux.HandleFunc("/admin/api/backup/failed", s.withAdminAuth(s.handleAdminApiBackupFailed))
+	mux.HandleFunc("/admin/api/backup/resolve", s.withAdminAuth(s.handleAdminApiBackupResolve))
 
 	mux.Handle("/lib/", http.FileServer(http.Dir(filepath.Join("web"))))
 }
@@ -414,6 +416,57 @@ func (s *Server) handleAdminApiBackupBackfill(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "queued": queued, "limit": limit})
 }
 
+func (s *Server) handleAdminApiBackupFailed(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	limit := parsePositiveLimit(r.URL.Query().Get("limit"), 20, 200)
+	offset := parseNonNegativeInt(r.URL.Query().Get("offset"), 0)
+	items, total, err := s.db.ListFailedBackupTasks(r.Context(), limit, offset)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "ok",
+		"items":  items,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
+}
+
+func (s *Server) handleAdminApiBackupResolve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	var req struct {
+		ImageID string `json:"image_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	req.ImageID = strings.TrimSpace(req.ImageID)
+	if req.ImageID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "image_id required"})
+		return
+	}
+
+	if err := s.db.MarkBackupResolved(r.Context(), req.ImageID); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 func (s *Server) handleAdminApiBackupRetryFailed(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -503,6 +556,14 @@ func (s *Server) withAdminAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+func parseNonNegativeInt(raw string, defaultVal int) int {
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || v < 0 {
+		return defaultVal
+	}
+	return v
 }
 
 func parsePositiveLimit(raw string, defaultVal, maxVal int) int {

@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>管理员后台</title>
   <link rel="icon" href="https://pan.0106010.xyz/file/Bimg/1770618967630_file_470.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/themes/light.css">
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js"></script>
   <style>
     :root {
       --bg: #f6f7fb;
@@ -363,6 +365,178 @@
       font-size: 1rem;
       font-weight: 700;
     }
+    .failed-fab-wrap {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 70;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #failed-fab-btn::part(base) {
+      width: 56px;
+      height: 56px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 105, 180, 0.6);
+      background: rgba(12, 16, 24, 0.78);
+      color: #ff77b0;
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
+      backdrop-filter: blur(8px);
+    }
+    #failed-fab-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      pointer-events: none;
+    }
+    .failed-panel {
+      position: fixed;
+      right: 18px;
+      bottom: 82px;
+      z-index: 68;
+      width: min(430px, calc(100vw - 22px));
+      max-height: min(72vh, 680px);
+      overflow: hidden;
+      background: color-mix(in srgb, var(--card-bg) 88%, transparent);
+      border: 1px solid rgba(255, 105, 180, 0.45);
+      border-radius: 16px;
+      box-shadow: 0 24px 42px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(14px);
+      transform-origin: 100% 100%;
+      transform: scale(0.86) translate(10px, 12px);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform 0.18s ease, opacity 0.18s ease;
+    }
+    .failed-panel.open {
+      transform: scale(1) translate(0, 0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .failed-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 12px 14px 10px;
+      border-bottom: 1px solid var(--glass-border);
+    }
+    .failed-panel-title {
+      font-size: 1rem;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+    }
+    .failed-panel-sub {
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-top: 2px;
+    }
+    .failed-panel-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .failed-panel-actions sl-icon-button::part(base) {
+      width: 30px;
+      height: 30px;
+      border-radius: 9px;
+      border: 1px solid var(--glass-border);
+      background: rgba(0,0,0,0.05);
+      color: var(--muted);
+    }
+    .failed-panel-body {
+      overflow: auto;
+      max-height: min(60vh, 560px);
+      padding: 8px 10px 10px;
+    }
+    .failed-empty {
+      color: var(--muted);
+      font-size: 0.9rem;
+      padding: 16px 8px;
+      text-align: center;
+    }
+    .failed-item {
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      padding: 10px;
+      margin-bottom: 8px;
+      background: rgba(0, 0, 0, 0.03);
+    }
+    .failed-item-id {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      word-break: break-all;
+      margin-bottom: 5px;
+    }
+    .failed-item-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+    .failed-item-err {
+      color: #b45309;
+      font-size: 0.82rem;
+      line-height: 1.4;
+      word-break: break-word;
+      margin-bottom: 8px;
+    }
+    .failed-item-meta {
+      color: var(--muted);
+      font-size: 0.76rem;
+      margin-bottom: 8px;
+    }
+    .failed-item-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .failed-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.82rem;
+      word-break: break-all;
+      max-width: 76%;
+    }
+    .failed-mini-btn {
+      width: 24px;
+      height: 24px;
+      border-radius: 8px;
+      border: 1px solid var(--glass-border);
+      background: rgba(0,0,0,0.08);
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      flex-shrink: 0;
+    }
+    .failed-mini-btn:hover {
+      color: #ef4444;
+      border-color: rgba(239, 68, 68, 0.5);
+    }
+    .failed-mini-btn svg {
+      width: 13px;
+      height: 13px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .failed-panel-footer {
+      padding: 0 10px 10px;
+      display: flex;
+      justify-content: center;
+    }
+    .failed-panel-footer .btn {
+      padding: 6px 12px;
+      font-size: 0.82rem;
+      border-radius: 10px;
+    }
     @media (max-width: 640px) {
       .stats-grid {
         grid-template-columns: 1fr;
@@ -496,6 +670,28 @@
     </div>
   </main>
 
+  <div class="failed-fab-wrap">
+    <sl-icon-button id="failed-fab-btn" name="bell" label="failed panel"></sl-icon-button>
+    <sl-badge id="failed-fab-badge" variant="danger" pill>0</sl-badge>
+  </div>
+
+  <aside class="failed-panel" id="failed-panel" aria-hidden="true">
+    <div class="failed-panel-header">
+      <div>
+        <div class="failed-panel-title">Failed Backups</div>
+        <div class="failed-panel-sub">After manual backup, click trash to clear the failed record.</div>
+      </div>
+      <div class="failed-panel-actions">
+        <sl-icon-button id="failed-refresh-btn" name="arrow-clockwise" label="refresh"></sl-icon-button>
+        <sl-icon-button id="failed-close-btn" name="x-lg" label="close"></sl-icon-button>
+      </div>
+    </div>
+    <div class="failed-panel-body" id="failed-panel-body"></div>
+    <div class="failed-panel-footer">
+      <button class="btn" type="button" id="failed-load-more-btn">Load more</button>
+    </div>
+  </aside>
+
   <script>
     const form = document.getElementById('upload-form');
     const result = document.getElementById('result');
@@ -515,13 +711,26 @@
     const backupRetryBtn = document.getElementById('backup-retry-btn');
     const backupRefreshBtn = document.getElementById('backup-refresh-btn');
 
+    const failedFabBtn = document.getElementById('failed-fab-btn');
+    const failedFabBadge = document.getElementById('failed-fab-badge');
+    const failedPanel = document.getElementById('failed-panel');
+    const failedPanelBody = document.getElementById('failed-panel-body');
+    const failedRefreshBtn = document.getElementById('failed-refresh-btn');
+    const failedCloseBtn = document.getElementById('failed-close-btn');
+    const failedLoadMoreBtn = document.getElementById('failed-load-more-btn');
+
     const PAGE_SIZE = 72;
+    const FAILED_PAGE_SIZE = 20;
     const BACKFILL_LIMIT_DEFAULT = 1000;
     const BACKFILL_LIMIT_MAX = 5000;
     let offset = 0;
     let done = false;
     let loading = false;
     let backfillAllRunning = false;
+    let failedPanelOpen = false;
+    let failedOffset = 0;
+    let failedTotal = 0;
+    let failedLoading = false;
     const analytics = initAnalytics();
 
     function readUmamiConfig() {
@@ -601,6 +810,139 @@
       return data;
     }
 
+    function setFailedBadge(count) {
+      if (!failedFabBadge) return;
+      const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+      failedFabBadge.textContent = safeCount > 99 ? '99+' : String(Math.max(0, safeCount));
+      failedFabBadge.style.display = safeCount > 0 ? 'inline-flex' : 'none';
+    }
+
+    function formatTime(ts) {
+      const n = Number(ts || 0);
+      if (!n) return '-';
+      return new Date(n * 1000).toLocaleString('zh-CN');
+    }
+
+    function escapeHTML(input) {
+      return String(input || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function toggleFailedPanel(open) {
+      failedPanelOpen = !!open;
+      if (!failedPanel) return;
+      failedPanel.classList.toggle('open', failedPanelOpen);
+      failedPanel.setAttribute('aria-hidden', failedPanelOpen ? 'false' : 'true');
+      if (failedPanelOpen) {
+        loadFailedItems(true);
+      }
+    }
+
+    function renderFailedEmpty(text) {
+      if (!failedPanelBody) return;
+      failedPanelBody.innerHTML = `<div class="failed-empty">${escapeHTML(text)}</div>`;
+    }
+
+    function buildResolveIcon() {
+      return '<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M7 6l1 14h8l1-14"/><path d="M10 11v6M14 11v6"/></svg>';
+    }
+
+    async function resolveFailedItem(imageID, itemEl) {
+      try {
+        await requestJSON('/admin/api/backup/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_id: imageID })
+        });
+        if (itemEl) itemEl.remove();
+        failedTotal = Math.max(0, failedTotal - 1);
+        setFailedBadge(failedTotal);
+        if (failedPanelBody && !failedPanelBody.querySelector('.failed-item')) {
+          renderFailedEmpty('No failed records.');
+        }
+        await loadBackupStats(false);
+      } catch (err) {
+        if (backupResult) {
+          backupResult.textContent = err.message || 'failed to clear record';
+        }
+      }
+    }
+
+    function renderFailedItems(items, append) {
+      if (!failedPanelBody) return;
+      if (!append) {
+        failedPanelBody.innerHTML = '';
+      }
+      if (!Array.isArray(items) || items.length === 0) {
+        if (!append) {
+          renderFailedEmpty('No failed records.');
+        }
+        return;
+      }
+
+      const frag = document.createDocumentFragment();
+      items.forEach((item) => {
+        const card = document.createElement('div');
+        card.className = 'failed-item';
+
+        const sourceURL = String(item.source_url || '').trim();
+        const linkURL = sourceURL && sourceURL !== 'none' ? sourceURL : '';
+
+        card.innerHTML = `
+          <div class="failed-item-id">${escapeHTML(item.image_id || '')}</div>
+          <div class="failed-item-title">${escapeHTML(item.title || '(no title)')}</div>
+          <div class="failed-item-err">${escapeHTML(item.last_error || '-')}</div>
+          <div class="failed-item-meta">retry ${formatNumber(item.retry_count || 0)} | ${escapeHTML(item.source || '-')} | ${escapeHTML(formatTime(item.updated_at))}</div>
+          <div class="failed-item-actions">
+            ${linkURL ? `<a class="failed-link" href="${escapeHTML(linkURL)}" target="_blank" rel="noopener">Open source link</a>` : '<span class="failed-link">No source link</span>'}
+            <button class="failed-mini-btn" type="button" title="Mark resolved">${buildResolveIcon()}</button>
+          </div>
+        `;
+
+        const resolveBtn = card.querySelector('.failed-mini-btn');
+        if (resolveBtn) {
+          resolveBtn.addEventListener('click', () => resolveFailedItem(item.image_id, card));
+        }
+
+        frag.appendChild(card);
+      });
+
+      failedPanelBody.appendChild(frag);
+    }
+
+    async function loadFailedItems(reset) {
+      if (!failedPanelBody || failedLoading) return;
+      failedLoading = true;
+
+      if (reset) {
+        failedOffset = 0;
+      }
+
+      try {
+        const data = await requestJSON(`/admin/api/backup/failed?limit=${FAILED_PAGE_SIZE}&offset=${failedOffset}`);
+        failedTotal = Number(data.total || 0);
+        setFailedBadge(failedTotal);
+
+        const items = Array.isArray(data.items) ? data.items : [];
+        renderFailedItems(items, !reset);
+
+        failedOffset += items.length;
+        if (failedLoadMoreBtn) {
+          failedLoadMoreBtn.style.display = failedOffset < failedTotal ? 'inline-flex' : 'none';
+        }
+      } catch (err) {
+        if (reset) {
+          renderFailedEmpty(err.message || 'failed to load list');
+        }
+      } finally {
+        failedLoading = false;
+      }
+    }
+
     function renderBackupStats(data) {
       const pendingEl = document.getElementById('backup-pending');
       const processingEl = document.getElementById('backup-processing');
@@ -613,6 +955,7 @@
       if (syncedEl) syncedEl.textContent = formatNumber(data.synced);
       if (failedEl) failedEl.textContent = formatNumber(data.failed);
       if (inflightEl) inflightEl.textContent = formatNumber(data.in_flight);
+      setFailedBadge(data.failed);
 
       const ts = Number(data.updated_at || 0);
       if (backupUpdated) {
@@ -683,6 +1026,9 @@
         const data = await requestJSON(`/admin/api/backup/retry-failed?limit=${limit}`, { method: 'POST' });
         backupResult.textContent = `retry reset: ${formatNumber(data.reset)} (limit=${data.limit})`;
         await loadBackupStats(false);
+        if (failedPanelOpen) {
+          await loadFailedItems(true);
+        }
       } catch (err) {
         backupResult.textContent = err.message || 'retry failed';
       }
@@ -722,6 +1068,9 @@
       } finally {
         setBackfillAllState(false);
         await loadBackupStats(false);
+        if (failedPanelOpen) {
+          await loadFailedItems(true);
+        }
       }
     }
 
@@ -953,10 +1302,25 @@
     if (backupRetryBtn) backupRetryBtn.addEventListener('click', runBackupRetry);
     if (backupRefreshBtn) backupRefreshBtn.addEventListener('click', () => loadBackupStats(true));
 
+    if (failedFabBtn) {
+      failedFabBtn.addEventListener('click', () => toggleFailedPanel(!failedPanelOpen));
+    }
+    if (failedCloseBtn) {
+      failedCloseBtn.addEventListener('click', () => toggleFailedPanel(false));
+    }
+    if (failedRefreshBtn) {
+      failedRefreshBtn.addEventListener('click', () => loadFailedItems(true));
+    }
+    if (failedLoadMoreBtn) {
+      failedLoadMoreBtn.addEventListener('click', () => loadFailedItems(false));
+    }
+
     initUmamiLinkButton();
     loadUmamiSummary();
     loadBackupStats(false);
     loadImageCounts();
+    setFailedBadge(0);
+    if (failedLoadMoreBtn) failedLoadMoreBtn.style.display = 'none';
     resetAndReload();
   </script>
 </body>
