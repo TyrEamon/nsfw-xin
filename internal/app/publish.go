@@ -49,7 +49,7 @@ func (a *App) sendDiscussionComment(ctx context.Context, meta imagePublishMeta, 
 	}
 	buttons := telegram.DiscussionButtons{
 		DetailsURL: channelMessageLink(a.Cfg.PublishChannelID, publishMsgID),
-		OriginURL:  channelMessageLink(a.Cfg.StorageChannelID, storageMsgID),
+		OriginURL:  a.buildOriginButtonURL(meta.ID, storageMsgID),
 	}
 	msgID, err := a.queueOrSendDiscussionComment(ctx, publishMsgID, comment, buttons)
 	if err != nil {

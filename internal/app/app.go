@@ -73,6 +73,13 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 		return nil, nil
 	}
 
+	if payload, isStart := parseStartPayload(msg.Text); isStart {
+		result, handled, err := a.handleStartPayload(ctx, msg, payload)
+		if handled {
+			return result, err
+		}
+	}
+
 	title := strings.TrimSpace(msg.Caption)
 	if title == "" {
 		title = strings.TrimSpace(msg.Text)
@@ -83,16 +90,21 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 
 	var fileID string
 	if msg.Document != nil {
-		fileID = msg.Document.FileID
+		fileID = strings.TrimSpace(msg.Document.FileID)
 	} else if len(msg.Photo) > 0 {
-		fileID = msg.Photo[len(msg.Photo)-1].FileID
+		fileID = strings.TrimSpace(msg.Photo[len(msg.Photo)-1].FileID)
+	}
+
+	links := extractSupportedLinks(msg.Text, msg.Caption)
+	if fileID == "" && len(links) == 0 {
+		return nil, nil
+	}
+
+	if !a.isTGIngestAuthorized(msg) {
+		return &TGIngestResult{Summary: "No publish permission."}, nil
 	}
 
 	if fileID == "" {
-		links := extractSupportedLinks(msg.Text, msg.Caption)
-		if len(links) == 0 {
-			return nil, nil
-		}
 		return a.handleTGLinks(ctx, links)
 	}
 
@@ -128,6 +140,9 @@ func (a *App) CanHandleTGMessage(msg *models.Message) bool {
 		return false
 	}
 	if msg.Chat.ID == a.Cfg.DiscussionGroupID && msg.IsAutomaticForward {
+		return true
+	}
+	if _, ok := parseStartPayload(msg.Text); ok {
 		return true
 	}
 	if len(msg.Photo) > 0 || msg.Document != nil {

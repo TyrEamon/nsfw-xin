@@ -14,6 +14,10 @@ type Config struct {
 	StorageChannelID         int64
 	DiscussionGroupID        int64
 	AdminPassword            string
+	BotUsername              string
+	OriginLinkSecret         string
+	OriginLinkTTLSeconds     int
+	TGAllowedUserIDs         map[int64]struct{}
 	BackupEnabled            bool
 	BackupWebDAVURL          string
 	BackupWebDAVUsername     string
@@ -50,6 +54,10 @@ func Load() *Config {
 	cfg := &Config{
 		BotToken:                 os.Getenv("BOT_TOKEN"),
 		AdminPassword:            os.Getenv("ADMIN_PASSWORD"),
+		BotUsername:              strings.TrimPrefix(getEnvString("BOT_USERNAME", ""), "@"),
+		OriginLinkSecret:         os.Getenv("ORIGIN_LINK_SECRET"),
+		OriginLinkTTLSeconds:     getEnvInt("ORIGIN_LINK_TTL_SECONDS", 604800),
+		TGAllowedUserIDs:         parseIDSet(os.Getenv("TG_ALLOWED_USER_IDS")),
 		BackupEnabled:            getEnvBool("BACKUP_ENABLED", false),
 		BackupWebDAVURL:          getEnvString("BACKUP_WEBDAV_URL", ""),
 		BackupWebDAVUsername:     os.Getenv("BACKUP_WEBDAV_USERNAME"),
@@ -129,7 +137,36 @@ func Load() *Config {
 		cfg.ChannelID = cfg.PublishChannelID
 	}
 
+	if cfg.OriginLinkTTLSeconds <= 0 {
+		cfg.OriginLinkTTLSeconds = 604800
+	}
+
 	return cfg
+}
+
+func (c *Config) IsTGUserAllowed(userID int64) bool {
+	if len(c.TGAllowedUserIDs) == 0 {
+		return true
+	}
+	_, ok := c.TGAllowedUserIDs[userID]
+	return ok
+}
+
+func parseIDSet(raw string) map[int64]struct{} {
+	out := make(map[int64]struct{})
+	for _, part := range strings.Split(raw, ",") {
+		v := strings.TrimSpace(part)
+		if v == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			log.Printf("invalid TG_ALLOWED_USER_IDS item %q: %v", v, err)
+			continue
+		}
+		out[id] = struct{}{}
+	}
+	return out
 }
 
 func getEnvInt(key string, fallback int) int {

@@ -264,6 +264,23 @@ func (c *Client) GetImage(ctx context.Context, id string) (map[string]interface{
 	return results[0], nil
 }
 
+func (c *Client) GetImageOrigin(ctx context.Context, id string) (originID, title string, ok bool, err error) {
+	sql := "SELECT origin_id, title FROM images WHERE id = ? AND status = 'active' LIMIT 1"
+	results, err := c.exec(ctx, sql, id)
+	if err != nil {
+		return "", "", false, err
+	}
+	if len(results) == 0 {
+		return "", "", false, nil
+	}
+	originID = strings.TrimSpace(rowString(results[0], "origin_id"))
+	title = strings.TrimSpace(rowString(results[0], "title"))
+	if originID == "" {
+		return "", title, false, nil
+	}
+	return originID, title, true, nil
+}
+
 func (c *Client) RandomImage(ctx context.Context, orientation string) (map[string]interface{}, error) {
 	sql := "SELECT id, preview_id, title, artist_name, artist_id, source_url, source, tags, created_at, width, height FROM images WHERE status = 'active' AND preview_id != ''"
 	params := []interface{}{}
