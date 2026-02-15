@@ -35,22 +35,30 @@ func (a *App) publishImage(ctx context.Context, data []byte, meta imagePublishMe
 		return database.Image{}, err
 	}
 
-	discussionMsgID := 0
-	if a.Cfg.DiscussionGroupID != 0 {
-		comment := buildDiscussionComment(meta)
-		if comment != "" {
-			buttons := telegram.DiscussionButtons{
-				DetailsURL: channelMessageLink(a.Cfg.PublishChannelID, result.PublishMsgID),
-				OriginURL:  channelMessageLink(a.Cfg.StorageChannelID, result.StorageMsgID),
-			}
-			msgID, commentErr := a.TG.SendDiscussionComment(ctx, result.PublishMsgID, comment, buttons)
-			discussionMsgID = msgID
-			if commentErr != nil {
-				log.Printf("discussion comment warning id=%s publish_msg_id=%d err=%v", meta.ID, result.PublishMsgID, commentErr)
-			}
-		}
-	}
+	discussionMsgID := a.sendDiscussionComment(ctx, meta, result.PublishMsgID, result.StorageMsgID)
+	return a.persistPublishedImage(ctx, meta, result, discussionMsgID)
+}
 
+func (a *App) sendDiscussionComment(ctx context.Context, meta imagePublishMeta, publishMsgID, storageMsgID int) int {
+	if a.Cfg.DiscussionGroupID == 0 {
+		return 0
+	}
+	comment := buildDiscussionComment(meta)
+	if comment == "" {
+		return 0
+	}
+	buttons := telegram.DiscussionButtons{
+		DetailsURL: channelMessageLink(a.Cfg.PublishChannelID, publishMsgID),
+		OriginURL:  channelMessageLink(a.Cfg.StorageChannelID, storageMsgID),
+	}
+	msgID, err := a.TG.SendDiscussionComment(ctx, publishMsgID, comment, buttons)
+	if err != nil {
+		log.Printf("discussion comment warning id=%s publish_msg_id=%d err=%v", meta.ID, publishMsgID, err)
+	}
+	return msgID
+}
+
+func (a *App) persistPublishedImage(ctx context.Context, meta imagePublishMeta, result telegram.SendResult, discussionMsgID int) (database.Image, error) {
 	img := database.Image{
 		ID:                meta.ID,
 		PreviewID:         result.PreviewID,
@@ -72,7 +80,6 @@ func (a *App) publishImage(ctx context.Context, data []byte, meta imagePublishMe
 		DiscussionGroupID: a.Cfg.DiscussionGroupID,
 		DiscussionMsgID:   discussionMsgID,
 	}
-
 	if err := a.DB.InsertImage(ctx, img); err != nil {
 		return database.Image{}, err
 	}

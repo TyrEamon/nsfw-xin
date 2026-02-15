@@ -17,6 +17,7 @@ import (
 const (
 	maxTGLinksPerMessage    = 3
 	defaultTwitterAPIDomain = "fxtwitter.com"
+	maxPixivAlbumGroup      = 10
 )
 
 var (
@@ -420,11 +421,23 @@ func (a *App) ingestPixivArtwork(ctx context.Context, id string, sourceURL strin
 	if err != nil {
 		return nil, fmt.Errorf("pixiv pages: %w", err)
 	}
+
+	isPixivLinkIngest := strings.TrimSpace(sourceURL) != ""
 	if sourceURL == "" {
 		sourceURL = fmt.Sprintf("https://www.pixiv.net/artworks/%s", id)
 	}
 
+	baseMeta := imagePublishMeta{
+		Title:      detail.Body.Title,
+		ArtistName: detail.Body.UserName,
+		ArtistID:   detail.Body.UserID,
+		SourceURL:  sourceURL,
+		Source:     "pixiv",
+		Tags:       strings.Join(tags, " "),
+	}
+
 	stats := &ingestStats{Title: detail.Body.Title}
+	candidates := make([]pixivPageCandidate, 0, len(pages))
 	for i, p := range pages {
 		pid := fmt.Sprintf("pixiv_%s_p%d", id, i)
 		if blocked, err := a.DB.IsBlocked(ctx, pid); err == nil && blocked {
@@ -437,33 +450,46 @@ func (a *App) ingestPixivArtwork(ctx context.Context, id string, sourceURL strin
 			log.Printf("Pixiv skip page pid=%s reason=already_exists", pid)
 			continue
 		}
+		candidates = append(candidates, pixivPageCandidate{
+			PageIndex: i,
+			PID:       pid,
+			URL:       p.URL,
+			Width:     p.Width,
+			Height:    p.Height,
+		})
+	}
 
-		imgData, err := a.Pixiv.Download(p.URL)
+	if len(candidates) == 0 {
+		return stats, nil
+	}
+
+	if isPixivLinkIngest && len(candidates) > 1 {
+		a.ingestPixivAlbumCandidates(ctx, id, candidates, baseMeta, stats)
+		return stats, nil
+	}
+
+	for _, c := range candidates {
+		imgData, err := a.Pixiv.Download(c.URL)
 		if err != nil {
 			stats.Failed++
-			log.Printf("Pixiv download failed pid=%s err=%v", pid, err)
+			log.Printf("Pixiv download failed pid=%s err=%v", c.PID, err)
 			continue
 		}
 
-		img, err := a.publishImage(ctx, imgData, imagePublishMeta{
-			ID:         pid,
-			Title:      detail.Body.Title,
-			ArtistName: detail.Body.UserName,
-			ArtistID:   detail.Body.UserID,
-			SourceURL:  sourceURL,
-			Source:     "pixiv",
-			Tags:       strings.Join(tags, " "),
-			CreatedAt:  time.Now().Unix(),
-		})
+		meta := baseMeta
+		meta.ID = c.PID
+		meta.CreatedAt = time.Now().Unix()
+
+		img, err := a.publishImage(ctx, imgData, meta)
 		if err != nil {
 			stats.Failed++
-			log.Printf("Pixiv publish failed pid=%s err=%v", pid, err)
+			log.Printf("Pixiv publish failed pid=%s err=%v", c.PID, err)
 		} else {
 			stats.Downloaded++
 			if stats.FirstID == "" {
-				stats.FirstID = pid
+				stats.FirstID = img.ID
 			}
-			log.Printf("Pixiv stored pid=%s size=%dx%d", pid, img.Width, img.Height)
+			log.Printf("Pixiv stored pid=%s size=%dx%d", c.PID, img.Width, img.Height)
 		}
 
 		time.Sleep(2 * time.Second)
