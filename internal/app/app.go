@@ -36,45 +36,24 @@ func New(cfg *config.Config, db *database.Client, tg *telegram.Client, pv *pixiv
 }
 
 func (a *App) HandleUpload(ctx context.Context, data []byte) error {
-	title := "upload"
-	artistName := "Arts"
-	artistID := "none"
-	sourceURL := "none"
-
-	previewID, originID, previewMsgID, originMsgID, width, height, err := a.TG.SendPreviewAndOrigin(ctx, data, title)
-	if err != nil {
-		return err
-	}
-
-	msgID := chooseMsgID(previewMsgID, originMsgID)
-	imgID := fmt.Sprintf("upload_%d", msgID)
-
-	img := database.Image{
+	imgID := fmt.Sprintf("upload_%d", time.Now().UnixNano())
+	_, err := a.publishImage(ctx, data, imagePublishMeta{
 		ID:         imgID,
-		PreviewID:  previewID,
-		OriginID:   originID,
-		Title:      title,
-		ArtistName: artistName,
-		ArtistID:   artistID,
-		SourceURL:  sourceURL,
+		Title:      "upload",
+		ArtistName: "Arts",
+		ArtistID:   "none",
+		SourceURL:  "none",
 		Source:     "upload",
-		Width:      width,
-		Height:     height,
 		CreatedAt:  time.Now().Unix(),
-	}
-
-	if err := a.DB.InsertImage(ctx, img); err != nil {
-		return err
-	}
-	a.enqueueBackup(ctx, img.ID)
-	return nil
+	})
+	return err
 }
 
 func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGIngestResult, error) {
 	if msg == nil {
 		return nil, nil
 	}
-	if msg.Chat.ID == a.Cfg.ChannelID {
+	if msg.Chat.ID == a.Cfg.PublishChannelID || msg.Chat.ID == a.Cfg.StorageChannelID || msg.Chat.ID == a.Cfg.DiscussionGroupID {
 		return nil, nil
 	}
 
@@ -106,38 +85,25 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 		return nil, err
 	}
 
-	previewID, originID, previewMsgID, originMsgID, width, height, err := a.TG.SendPreviewAndOrigin(ctx, data, title)
-	if err != nil {
-		return nil, err
-	}
-
-	msgID := chooseMsgID(previewMsgID, originMsgID)
-	sourceURL := channelMessageLink(a.Cfg.ChannelID, msgID)
-
-	img := database.Image{
-		ID:         fmt.Sprintf("tg_%d", msgID),
-		PreviewID:  previewID,
-		OriginID:   originID,
+	imgID := fmt.Sprintf("tg_%d_%d", msg.Chat.ID, msg.ID)
+	img, err := a.publishImage(ctx, data, imagePublishMeta{
+		ID:         imgID,
 		Title:      title,
 		ArtistName: "Arts",
 		ArtistID:   "none",
-		SourceURL:  sourceURL,
+		SourceURL:  "none",
 		Source:     "tg",
-		Width:      width,
-		Height:     height,
 		CreatedAt:  time.Now().Unix(),
-	}
-
-	if err := a.DB.InsertImage(ctx, img); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
-	a.enqueueBackup(ctx, img.ID)
 
 	return &TGIngestResult{
 		ID:        img.ID,
 		Title:     img.Title,
 		SourceURL: img.SourceURL,
-		Summary:   fmt.Sprintf("这张图我就顺手收下了喵~\n已入库 ID：%s", img.ID),
+		Summary:   fmt.Sprintf("Done meow~\nID: %s", img.ID),
 	}, nil
 }
 
@@ -340,11 +306,4 @@ func channelMessageLink(channelID int64, msgID int) string {
 		s = s[1:]
 	}
 	return fmt.Sprintf("https://t.me/c/%s/%d", s, msgID)
-}
-
-func chooseMsgID(previewMsgID, originMsgID int) int {
-	if originMsgID > 0 {
-		return originMsgID
-	}
-	return previewMsgID
 }

@@ -6,17 +6,26 @@ CREATE TABLE IF NOT EXISTS images (
   artist_name TEXT,
   artist_id TEXT,
   source_url TEXT,
+  source_text TEXT,
   source TEXT,
   tags TEXT,
   created_at INTEGER,
   width INTEGER,
   height INTEGER,
+  publish_channel_id INTEGER,
+  publish_message_id INTEGER,
+  storage_channel_id INTEGER,
+  storage_message_id INTEGER,
+  discussion_group_id INTEGER,
+  discussion_message_id INTEGER,
   status TEXT NOT NULL DEFAULT 'active'
 );
 
 CREATE INDEX IF NOT EXISTS idx_images_created_at ON images(created_at);
 CREATE INDEX IF NOT EXISTS idx_images_artist ON images(artist_name);
 CREATE INDEX IF NOT EXISTS idx_images_status_created_at ON images(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_images_publish_message ON images(publish_channel_id, publish_message_id);
+CREATE INDEX IF NOT EXISTS idx_images_storage_message ON images(storage_channel_id, storage_message_id);
 
 CREATE TABLE IF NOT EXISTS favorites (
   image_id TEXT PRIMARY KEY,

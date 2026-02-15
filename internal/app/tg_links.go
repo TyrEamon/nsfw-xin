@@ -12,8 +12,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"pixiv-tg-gallery/internal/database"
 )
 
 const (
@@ -269,34 +267,24 @@ func (a *App) ingestYandeFromLink(ctx context.Context, item supportedLink) (*TGI
 		return nil, err
 	}
 
-	previewID, originID, _, _, width, height, err := a.TG.SendPreviewAndOrigin(ctx, data, "Yandex")
-	if err != nil {
-		return nil, err
-	}
-
-	img := database.Image{
+	img, err := a.publishImage(ctx, data, imagePublishMeta{
 		ID:         imgID,
-		PreviewID:  previewID,
-		OriginID:   originID,
 		Title:      "Yandex",
 		ArtistName: "Arts",
 		ArtistID:   "none",
 		SourceURL:  item.URL,
 		Source:     "yande",
 		Tags:       strings.TrimSpace(post.Tags),
-		Width:      width,
-		Height:     height,
 		CreatedAt:  time.Now().Unix(),
-	}
-	if err := a.DB.InsertImage(ctx, img); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
-	a.enqueueBackup(ctx, img.ID)
 
 	return &TGIngestResult{
-		ID:        imgID,
-		Title:     "Yandex",
-		SourceURL: item.URL,
+		ID:        img.ID,
+		Title:     img.Title,
+		SourceURL: img.SourceURL,
 		Summary:   fmt.Sprintf("Yande %s ingested (+1)", item.ID),
 	}, nil
 }
@@ -378,38 +366,26 @@ func (a *App) ingestTwitterTweet(ctx context.Context, tweetID, sourceURL string)
 			continue
 		}
 
-		previewID, originID, _, _, width, height, err := a.TG.SendPreviewAndOrigin(ctx, imgData, title)
-		if err != nil {
-			stats.Failed++
-			log.Printf("Twitter tg send failed pid=%s err=%v", pid, err)
-			continue
-		}
-
-		img := database.Image{
+		img, err := a.publishImage(ctx, imgData, imagePublishMeta{
 			ID:         pid,
-			PreviewID:  previewID,
-			OriginID:   originID,
 			Title:      title,
 			ArtistName: artistName,
 			ArtistID:   artistID,
 			SourceURL:  sourceURL,
+			SourceText: tweet.Text,
 			Source:     "twitter",
 			Tags:       tags,
-			Width:      width,
-			Height:     height,
 			CreatedAt:  time.Now().Unix(),
-		}
-
-		if err := a.DB.InsertImage(ctx, img); err != nil {
+		})
+		if err != nil {
 			stats.Failed++
-			log.Printf("Twitter d1 insert failed pid=%s err=%v", pid, err)
+			log.Printf("Twitter publish failed pid=%s err=%v", pid, err)
 		} else {
-			a.enqueueBackup(ctx, img.ID)
 			stats.Downloaded++
 			if stats.FirstID == "" {
 				stats.FirstID = pid
 			}
-			log.Printf("Twitter stored pid=%s size=%dx%d", pid, width, height)
+			log.Printf("Twitter stored pid=%s size=%dx%d", pid, img.Width, img.Height)
 		}
 
 		time.Sleep(1500 * time.Millisecond)
@@ -469,38 +445,25 @@ func (a *App) ingestPixivArtwork(ctx context.Context, id string, sourceURL strin
 			continue
 		}
 
-		previewID, originID, _, _, width, height, err := a.TG.SendPreviewAndOrigin(ctx, imgData, detail.Body.Title)
-		if err != nil {
-			stats.Failed++
-			log.Printf("Pixiv tg send failed pid=%s err=%v", pid, err)
-			continue
-		}
-
-		img := database.Image{
+		img, err := a.publishImage(ctx, imgData, imagePublishMeta{
 			ID:         pid,
-			PreviewID:  previewID,
-			OriginID:   originID,
 			Title:      detail.Body.Title,
 			ArtistName: detail.Body.UserName,
 			ArtistID:   detail.Body.UserID,
 			SourceURL:  sourceURL,
 			Source:     "pixiv",
 			Tags:       strings.Join(tags, " "),
-			Width:      width,
-			Height:     height,
 			CreatedAt:  time.Now().Unix(),
-		}
-
-		if err := a.DB.InsertImage(ctx, img); err != nil {
+		})
+		if err != nil {
 			stats.Failed++
-			log.Printf("Pixiv d1 insert failed pid=%s err=%v", pid, err)
+			log.Printf("Pixiv publish failed pid=%s err=%v", pid, err)
 		} else {
-			a.enqueueBackup(ctx, img.ID)
 			stats.Downloaded++
 			if stats.FirstID == "" {
 				stats.FirstID = pid
 			}
-			log.Printf("Pixiv stored pid=%s size=%dx%d", pid, width, height)
+			log.Printf("Pixiv stored pid=%s size=%dx%d", pid, img.Width, img.Height)
 		}
 
 		time.Sleep(2 * time.Second)

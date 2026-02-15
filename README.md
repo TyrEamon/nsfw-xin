@@ -1,144 +1,101 @@
-# Xin - Pixiv + Telegram Gallery (Go)
+# Xin Gallery Puls - Pixiv + Telegram + D1 Gallery
 
-Xin is a Go-based illustration gallery system.
+Xin Gallery Puls is a Go-based ACG gallery backend.
 
-It ingests images from:
-- Pixiv bookmarks
-- Telegram bot messages (photo/document)
-- Telegram links (Pixiv artwork links, yande.re post links, and X/Twitter status links)
+It supports ingest from:
+- Pixiv bookmarks crawler
+- Telegram direct photo/document
+- Telegram links (Pixiv / yande.re / X/Twitter)
 
 It stores:
-- Image files in a Telegram channel (via file_id)
-- Metadata in Cloudflare D1
+- Preview post in **Publish Channel (A)**
+- Origin file in **Storage Channel (B)**
+- Metadata in **Cloudflare D1**
+- Optional backup to WebDAV/OpenList
 
-It provides:
-- Gallery page
-- Favorites page
-- Admin upload/management page
+---
 
-## Architecture
+## v2 Core Model (A/B + discussion)
 
-Data flow:
-1. Ingest image
-2. Upload preview + origin to Telegram channel
-3. Save metadata to D1
-4. Frontend reads metadata from API and fetches image via `/image/{file_id}`
+- `PUBLISH_CHANNEL_ID` (A): gallery preview posts
+- `STORAGE_CHANNEL_ID` (B): origin file storage (document)
+- `DISCUSSION_GROUP_ID` (optional): linked discussion group for A
 
-Core components:
-- `cmd/server/main.go`: app entrypoint, HTTP server, Telegram bot startup
-- `internal/config/config.go`: env config loading
-- `internal/app/`: ingest + crawler business logic
-- `internal/database/d1.go`: D1 access and schema ensure
-- `internal/pixiv/pixiv.go`: Pixiv API calls and image download
-- `internal/telegram/telegram.go`: Telegram upload/download utilities
-- `internal/web/server.go`: page and API routes
-- `web/`: frontend assets
+Flow per image:
+1. Send preview photo to A (caption)
+2. Send origin document to B
+3. If discussion group configured, post comment in A's thread:
+   - origin link (to B message)
+   - source link
+4. Write record into D1
 
-## Features
+Twitter link ingest caption style:
+- Header: `title(source_url) / artist`
+- Blockquote 1: tweet text
+- Blockquote 2: hashtags (if any)
 
-### 1) Pixiv bookmark crawler
-- Scheduled crawler for user bookmarks
-- Uploads preview + origin to Telegram channel
-- Writes records to D1
-- Supports tag filter (`PIXIV_TAG`)
-- Supports public/private bookmark source (`PIXIV_REST`)
-- Supports crawl order (`PIXIV_CRAWL_ORDER`)
+---
 
-### 2) Telegram direct image ingest
-- User sends photo/document to bot
-- Bot forwards/normalizes into channel storage
-- Metadata is saved to D1
+## Project Layout
 
-### 3) Telegram link ingest
-Supported links:
-- Pixiv artwork: `https://www.pixiv.net/artworks/<id>`
-- yande.re post: `https://yande.re/post/show/<id>`
-- X/Twitter status: `https://x.com/<user>/status/<id>`
+- `cmd/server/main.go`: startup, HTTP, Telegram bot
+- `internal/config/config.go`: env loading
+- `internal/app/`: ingest/crawler logic
+- `internal/telegram/telegram.go`: Telegram send/download
+- `internal/database/d1.go`: D1 schema + queries
+- `internal/web/server.go`: HTTP pages and APIs
+- `schema.sql`: canonical D1 schema
+- `web/`: frontend static pages
 
-Behavior:
-- Pixiv link: use Pixiv title/artist/artist_id
-- yande.re link: fixed metadata
-  - `title = Yandex`
-  - `artist_name = Arts`
-  - `artist_id = none`
-  - `source_url = original yande.re link`
-- X/Twitter link: use tweet text as title (first line), author display name as `artist_name`, and author username as `artist_id`
-- Max links per message: 3
-
-### 4) Admin management
-- Admin upload page with Basic Auth
-- Thumbnail management wall
-- Favorite toggle
-- Hide action (soft delete + blocklist)
-
-### 5) Anti-reingest mechanism
-- Hide action does:
-  - `images.status = hidden`
-  - insert into `ingest_blocklist`
-  - remove from `favorites`
-- Crawler checks blocklist and skips blocked IDs
-
-### 6) Favorites system
-- Separate favorites page
-- Admin can mark/unmark favorite
-- Public favorites API available
-
-### 7) Random image API (preview-only)
-- `/api/random`
-- `/api/random?type=h`
-- `/api/random?type=v`
-- `/api/random?format=url`
-- `/api/random?format=redirect`
-- Intentionally removes `origin_id` in response
-
-### 8) Async backup to OpenList WebDAV (optional)
-- TG remains primary storage
-- Backup worker pulls from TG and uploads to WebDAV/OneDrive
-- Default path split:
-  - `/MyPixiv/preview/...`
-  - `/MyPixiv/origin/...`
-- Non-blocking by design: ingest succeeds first, backup runs in background
-
-## Requirements
-
-- Go 1.21+
-- Reachable network to Telegram API and Pixiv
-- Cloudflare D1 credentials
+---
 
 ## Environment Variables
 
-Required:
+### Required
+
 - `BOT_TOKEN`
-- `CHANNEL_ID`
+- `PUBLISH_CHANNEL_ID`
+- `STORAGE_CHANNEL_ID`
 - `CLOUDFLARE_ACCOUNT_ID`
 - `CLOUDFLARE_API_TOKEN`
 - `D1_DATABASE_ID`
 - `ADMIN_PASSWORD`
 
-Pixiv:
+### Optional / compatibility
+
+- `CHANNEL_ID`
+  - backward compatibility fallback
+  - if `PUBLISH_CHANNEL_ID` or `STORAGE_CHANNEL_ID` is empty, fallback to `CHANNEL_ID`
+- `DISCUSSION_GROUP_ID`
+  - linked group for channel comments
+
+### Pixiv
+
 - `PIXIV_PHPSESSID`
 - `PIXIV_USER_ID`
-- `PIXIV_TAG` (optional; empty means no tag filter)
-- `PIXIV_REST` (optional; `show` or `hide`, default `show`)
-- `PIXIV_CRAWL_ORDER` (optional; `desc` or `asc`, default `desc`)
+- `PIXIV_TAG` (optional, empty = all)
+- `PIXIV_REST` (`show` or `hide`, default `show`)
+- `PIXIV_CRAWL_ORDER` (`desc` or `asc`, default `desc`)
 - `PIXIV_LIMIT` (default `40`)
 - `PIXIV_MAX_PAGES` (legacy fallback, default `0` = unlimited)
-- `PIXIV_BOOTSTRAP_MAX_PAGES` (default `-1`; inherit `PIXIV_MAX_PAGES`)
+- `PIXIV_BOOTSTRAP_MAX_PAGES` (default `-1` -> fallback to `PIXIV_MAX_PAGES`)
 - `PIXIV_INCREMENTAL_MAX_PAGES` (default `2`)
 - `PIXIV_INTERVAL_MINUTES` (default `120`)
 
-Server:
-- `LISTEN_ADDR` (default `:8080`)
-- `TWITTER_API_DOMAIN` (optional, default `fxtwitter.com`)
-- `UMAMI_BASE_URL` (optional, e.g. `https://umamii.zeabur.app`)
-- `UMAMI_WEBSITE_ID_FRONTEND` (optional, Umami website id for `tyr.mtcacg.top`)
-- `UMAMI_LOOKBACK_DAYS` (optional, default `7`)
-- `UMAMI_API_TOKEN` (optional, static token mode)
-- `UMAMI_USERNAME` + `UMAMI_PASSWORD` (optional, auto-login mode; recommended)
+### Other integrations
 
-Backup (optional):
+- `TWITTER_API_DOMAIN` (default `fxtwitter.com`)
+- `UMAMI_BASE_URL`
+- `UMAMI_WEBSITE_ID_FRONTEND`
+- `UMAMI_USERNAME`
+- `UMAMI_PASSWORD`
+- `UMAMI_API_TOKEN`
+- `UMAMI_LOOKBACK_DAYS` (default `7`)
+
+### Backup (optional)
+
 - `BACKUP_ENABLED` (`true/false`, default `false`)
-- `BACKUP_WEBDAV_URL` (e.g. `https://your-openlist.example.com/dav/`)
+- `BACKUP_WEBDAV_URL`
 - `BACKUP_WEBDAV_USERNAME`
 - `BACKUP_WEBDAV_PASSWORD`
 - `BACKUP_BASE_PATH` (default `/MyPixiv`)
@@ -147,40 +104,78 @@ Backup (optional):
 - `BACKUP_POLL_SECONDS` (default `8`)
 - `BACKUP_TASK_TIMEOUT_SECONDS` (default `120`)
 
-## Bootstrap vs Incremental Crawl
+### Server
 
-State key in D1 table `crawler_state`:
-- `key = pixiv_bootstrap_done`
-- value `1` means incremental mode
-- missing/`0` means bootstrap mode
+- `LISTEN_ADDR` (default `:8080`)
 
-Page limit selection:
-- Bootstrap mode: `PIXIV_BOOTSTRAP_MAX_PAGES` (or fallback to `PIXIV_MAX_PAGES`)
-- Incremental mode: `PIXIV_INCREMENTAL_MAX_PAGES`
+---
 
-If initial full crawl is already done, set incremental mode manually:
+## D1 Schema
 
-```sql
-CREATE TABLE IF NOT EXISTS crawler_state (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL,
-  updated_at INTEGER NOT NULL
-);
+Use `schema.sql`.
 
-INSERT OR REPLACE INTO crawler_state (key, value, updated_at)
-VALUES ('pixiv_bootstrap_done', '1', strftime('%s','now'));
-```
+`images` now includes extra v2 fields:
+- `source_text`
+- `publish_channel_id`, `publish_message_id`
+- `storage_channel_id`, `storage_message_id`
+- `discussion_group_id`, `discussion_message_id`
 
-## Run Locally
+Backend `EnsureSchema` can auto-add missing columns for upgrade.
 
-```bash
-go run ./cmd/server
-```
+---
+
+## Fresh Deploy (from zero)
+
+## 1) Telegram setup
+
+1. Create channel A (publish).
+2. Create channel B (storage).
+3. (Optional) Create/choose discussion group and link to channel A.
+4. Add bot as admin in A and B.
+5. If using discussion comments, ensure bot can send messages in the linked group.
+
+## 2) D1 setup
+
+1. Create a new D1 database.
+2. Run `schema.sql` (or let backend auto-create on first start).
+
+## 3) Zeabur env setup
+
+At minimum set:
+
+- `BOT_TOKEN`
+- `PUBLISH_CHANNEL_ID`
+- `STORAGE_CHANNEL_ID`
+- `DISCUSSION_GROUP_ID` (optional)
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_API_TOKEN`
+- `D1_DATABASE_ID`
+- `ADMIN_PASSWORD`
+
+## 4) Build and deploy
+
+- Build from Dockerfile and deploy to Zeabur.
+- Confirm logs contain `HTTP server listening on :8080`.
+
+## 5) Quick verification
+
+1. Send a test image to bot:
+   - A gets preview
+   - B gets origin
+   - D1 has one row
+2. Send a Twitter link to bot:
+   - caption includes title/source/artist + tweet quote + hashtag quote
+   - discussion comment contains origin link + source link
+3. Open:
+   - `/gallery`
+   - `/admin/upload` (Basic Auth)
+
+---
 
 ## HTTP Routes
 
 Pages:
-- `GET /` -> redirects to `/gallery`
+- `GET /` -> redirect `/gallery`
 - `GET /gallery`
 - `GET /favorites`
 - `GET /admin/upload` (Basic Auth)
@@ -194,91 +189,25 @@ Public APIs:
 - `GET /api/random?format=url`
 - `GET /api/random?format=redirect`
 - `GET /image/{file_id}`
-  - optional `?dl=1` to force download header
 
-Admin APIs (Basic Auth):
-- `GET /admin/api/images?status=active|hidden|all&offset=0&limit=60`
+Admin APIs:
+- `GET /admin/api/images`
+- `GET /admin/api/images/count`
 - `POST /admin/api/images/hide`
-  - body: `{"id":"...", "reason":"admin_hide"}`
 - `POST /admin/api/images/favorite`
-  - body: `{"id":"...", "on":true|false}`
 - `GET /admin/api/umami/summary`
-  - returns: `visitors`, `visits`, `pageviews`, `countries`, `range_days`, `updated_at`
-- `GET /admin/api/backup/health?probe=1`
-  - returns backup health snapshot (`enabled`, `running`, `status`, `last_error`)
+- `GET /admin/api/backup/health`
 - `GET /admin/api/backup/stats`
-  - returns backup counters (`pending`, `synced`, `failed`, `in_flight`)
-- `POST /admin/api/backup/backfill?limit=1000`
-  - enqueue historical images into backup queue
-- `POST /admin/api/backup/retry-failed?limit=500`
-  - reset failed backups to pending
+- `POST /admin/api/backup/backfill`
+- `POST /admin/api/backup/retry-failed`
+- `GET /admin/api/backup/failed`
+- `POST /admin/api/backup/resolve`
 
-## Database
+---
 
-On startup, backend calls `EnsureSchema` and auto-upgrades schema:
-- creates missing tables: `favorites`, `ingest_blocklist`, `crawler_state`
-- adds `status` column to `images` if missing
+## Notes
 
-Canonical schema file:
-- `schema.sql`
-
-Current logical tables:
-- `images`
-- `favorites`
-- `ingest_blocklist`
-- `crawler_state`
-- `image_backups`
-
-## Deployment Notes
-
-Typical setup:
-- Backend on Zeabur (for example: `pic.mtcacg.top`)
-- Frontend static on EdgeOne/Pages (for example: `tyr.mtcacg.top`)
-
-## Umami Analytics (optional)
-
-Integrated frontend events:
-- `filter_switch`
-- `image_open`
-- `source_click`
-- `download_click`
-- `admin_upload_result`
-
-Set your Umami website id in these files:
-- `web/gallery.html` -> `data-umami-website-id`
-- `web/favorites.html` -> `data-umami-website-id`
-- `web/admin/upload.html` -> `data-umami-website-id`
-
-Current Umami host is preset to `https://umamii.zeabur.app`.
-
-For admin stats card (`/admin/upload`), backend calls Umami API:
-- Prefer `UMAMI_USERNAME` + `UMAMI_PASSWORD` so backend can auto-login and refresh session token.
-- `UMAMI_API_TOKEN` can be used as fallback static token.
-
-If Zeabur fails pulling GHCR image (401):
-- Make package public, or
-- Configure GHCR credentials in Zeabur
-
-If Telegram bot reports `409 terminated by other getUpdates request`:
-- Only run one bot instance
-
-## Troubleshooting
-
-1. Telegram timeout errors
-- Example: `sendPhoto ... context deadline exceeded`
-- Usually network instability to Telegram API
-
-2. Cloudflare cache status `MISS`
-- First request to edge is expected MISS
-- Subsequent same URL should move toward HIT
-
-3. Hidden image reappears
-- Verify `ingest_blocklist` has the corresponding key
-
-4. Pixiv link ingest fails
-- Recheck `PIXIV_PHPSESSID` validity
-
-## Security
-
-- Never expose `BOT_TOKEN` in logs/screenshots.
-- If leaked, regenerate token immediately in BotFather and update env.
+- Random image API returns preview only by design.
+- `/image/{file_id}` is long-cache friendly (`max-age=31536000, immutable`).
+- Keep only one bot instance to avoid Telegram `getUpdates 409 conflict`.
+- If token/password leaked, rotate immediately.

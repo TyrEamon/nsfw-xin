@@ -28,17 +28,40 @@ const (
 )
 
 type Client struct {
-	Bot       *bot.Bot
-	Token     string
-	ChannelID int64
+	Bot               *bot.Bot
+	Token             string
+	PublishChannelID  int64
+	StorageChannelID  int64
+	DiscussionGroupID int64
 }
 
-func New(token string, channelID int64) (*Client, error) {
+type SendOptions struct {
+	PreviewCaption string
+	OriginCaption  string
+}
+
+type SendResult struct {
+	PreviewID       string
+	OriginID        string
+	PublishMsgID    int
+	StorageMsgID    int
+	DiscussionMsgID int
+	Width           int
+	Height          int
+}
+
+func New(token string, publishChannelID, storageChannelID, discussionGroupID int64) (*Client, error) {
 	b, err := bot.New(token)
 	if err != nil {
 		return nil, err
 	}
-	return &Client{Bot: b, Token: token, ChannelID: channelID}, nil
+	return &Client{
+		Bot:               b,
+		Token:             token,
+		PublishChannelID:  publishChannelID,
+		StorageChannelID:  storageChannelID,
+		DiscussionGroupID: discussionGroupID,
+	}, nil
 }
 
 func (c *Client) DownloadFile(ctx context.Context, fileID string) ([]byte, string, error) {
@@ -103,67 +126,99 @@ func (c *Client) DownloadFile(ctx context.Context, fileID string) ([]byte, strin
 	return nil, "", lastErr
 }
 
-func shouldRetryStatus(status int) bool {
-	return status == http.StatusTooManyRequests || status >= 500
-}
+func (c *Client) SendArtwork(ctx context.Context, data []byte, opts SendOptions) (SendResult, error) {
+	res := SendResult{}
+	res.Width, res.Height, _ = getImageInfo(data)
 
-func shouldRetryError(err error) bool {
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-	return true
-}
-
-func sleepRetry(ctx context.Context, attempt int) error {
-	delay := retryBaseDelay * time.Duration(1<<uint(attempt-1))
-	t := time.NewTimer(delay)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
-}
-
-func (c *Client) SendPreviewAndOrigin(ctx context.Context, data []byte, caption string) (previewID, originID string, previewMsgID, originMsgID int, width, height int, err error) {
-	width, height, format := getImageInfo(data)
-	originName := "origin." + extFromFormat(format)
 	previewData := data
-	if needsCompress(data, width, height) {
+	if needsCompress(data, res.Width, res.Height) {
 		if compressed, err := compressImage(data, maxPhotoSize); err == nil {
 			previewData = compressed
 		}
 	}
 
-	photoMsg, err := c.Bot.SendPhoto(ctx, &bot.SendPhotoParams{
-		ChatID:  c.ChannelID,
-		Photo:   &models.InputFileUpload{Filename: "preview.jpg", Data: bytes.NewReader(previewData)},
-		Caption: caption,
+	publishMsg, err := c.Bot.SendPhoto(ctx, &bot.SendPhotoParams{
+		ChatID:    c.PublishChannelID,
+		Photo:     &models.InputFileUpload{Filename: "preview.jpg", Data: bytes.NewReader(previewData)},
+		Caption:   opts.PreviewCaption,
+		ParseMode: models.ParseModeHTML,
 	})
 	if err != nil {
-		return "", "", 0, 0, width, height, err
+		return SendResult{}, err
 	}
-	if len(photoMsg.Photo) > 0 {
-		previewID = photoMsg.Photo[len(photoMsg.Photo)-1].FileID
+	res.PublishMsgID = publishMsg.ID
+	if len(publishMsg.Photo) > 0 {
+		res.PreviewID = publishMsg.Photo[len(publishMsg.Photo)-1].FileID
 	}
-	previewMsgID = photoMsg.ID
 
-	docMsg, docErr := c.Bot.SendDocument(ctx, &bot.SendDocumentParams{
-		ChatID:   c.ChannelID,
+	originCaption := opts.OriginCaption
+	if originCaption == "" {
+		originCaption = "Original"
+	}
+	_, format := detectImageFormat(data)
+	originName := "origin." + extFromFormat(format)
+	storageMsg, err := c.Bot.SendDocument(ctx, &bot.SendDocumentParams{
+		ChatID:   c.StorageChannelID,
 		Document: &models.InputFileUpload{Filename: originName, Data: bytes.NewReader(data)},
-		Caption:  "Original",
-		ReplyParameters: &models.ReplyParameters{
-			MessageID: photoMsg.ID,
+		Caption:  originCaption,
+	})
+	if err != nil {
+		return SendResult{}, err
+	}
+	res.StorageMsgID = storageMsg.ID
+	if storageMsg.Document != nil {
+		res.OriginID = storageMsg.Document.FileID
+	}
+
+	return res, nil
+}
+
+func (c *Client) SendDiscussionComment(ctx context.Context, publishMessageID int, text string) (int, error) {
+	disablePreview := true
+	msg, err := c.Bot.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:          c.DiscussionGroupID,
+		MessageThreadID: publishMessageID,
+		Text:            text,
+		ParseMode:       models.ParseModeHTML,
+		LinkPreviewOptions: &models.LinkPreviewOptions{
+			IsDisabled: &disablePreview,
 		},
 	})
-	if docErr == nil && docMsg.Document != nil {
-		originID = docMsg.Document.FileID
-		originMsgID = docMsg.ID
+	if err == nil {
+		return msg.ID, nil
 	}
 
-	return previewID, originID, previewMsgID, originMsgID, width, height, nil
+	fallback, fallbackErr := c.Bot.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    c.DiscussionGroupID,
+		Text:      text,
+		ParseMode: models.ParseModeHTML,
+		LinkPreviewOptions: &models.LinkPreviewOptions{
+			IsDisabled: &disablePreview,
+		},
+	})
+	if fallbackErr != nil {
+		return 0, err
+	}
+	return fallback.ID, err
+}
+
+func detectImageFormat(data []byte) (image.Config, string) {
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return image.Config{}, ""
+	}
+	return cfg, format
+}
+
+func (c *Client) SendPreviewAndOrigin(ctx context.Context, data []byte, caption string) (previewID, originID string, previewMsgID, originMsgID int, width, height int, err error) {
+	res, err := c.SendArtwork(ctx, data, SendOptions{
+		PreviewCaption: caption,
+		OriginCaption:  "Original",
+	})
+	if err != nil {
+		return "", "", 0, 0, 0, 0, err
+	}
+	return res.PreviewID, res.OriginID, res.PublishMsgID, res.StorageMsgID, res.Width, res.Height, nil
 }
 
 func getImageInfo(data []byte) (int, int, string) {
@@ -227,6 +282,30 @@ func compressImage(data []byte, targetSize int64) ([]byte, error) {
 			return buf.Bytes(), nil
 		}
 		quality -= 3
+	}
+}
+
+func shouldRetryStatus(status int) bool {
+	return status == http.StatusTooManyRequests || status >= 500
+}
+
+func shouldRetryError(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	return true
+}
+
+func sleepRetry(ctx context.Context, attempt int) error {
+	delay := retryBaseDelay * time.Duration(1<<uint(attempt-1))
+	t := time.NewTimer(delay)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
 	}
 }
 

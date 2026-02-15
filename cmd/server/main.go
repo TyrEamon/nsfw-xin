@@ -26,8 +26,8 @@ import (
 
 func main() {
 	cfg := config.Load()
-	if cfg.BotToken == "" || cfg.ChannelID == 0 {
-		log.Fatal("BOT_TOKEN or CHANNEL_ID missing")
+	if cfg.BotToken == "" || cfg.PublishChannelID == 0 || cfg.StorageChannelID == 0 {
+		log.Fatal("BOT_TOKEN or channel config missing (PUBLISH_CHANNEL_ID/STORAGE_CHANNEL_ID or CHANNEL_ID)")
 	}
 	if cfg.D1AccountID == "" || cfg.D1ApiToken == "" || cfg.D1DatabaseID == "" {
 		log.Fatal("D1 credentials missing")
@@ -40,7 +40,7 @@ func main() {
 	if err := db.EnsureSchema(context.Background()); err != nil {
 		log.Fatalf("ensure schema error: %v", err)
 	}
-	tg, err := telegram.New(cfg.BotToken, cfg.ChannelID)
+	tg, err := telegram.New(cfg.BotToken, cfg.PublishChannelID, cfg.StorageChannelID, cfg.DiscussionGroupID)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func main() {
 		result, err := application.HandleTGMessage(ctx, update.Message)
 		if err != nil {
 			log.Printf("tg handle error: %v", err)
-			if update.Message != nil && update.Message.Chat.ID != cfg.ChannelID {
+			if update.Message != nil && update.Message.Chat.ID != cfg.PublishChannelID && update.Message.Chat.ID != cfg.StorageChannelID && update.Message.Chat.ID != cfg.DiscussionGroupID {
 				_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 					ChatID: update.Message.Chat.ID,
 					Text:   fmt.Sprintf("哼，这次才不是我失手呢喵~\n是网络在捣乱啦。\n错误：%v", err),

@@ -11,18 +11,25 @@ import (
 )
 
 type Image struct {
-	ID         string
-	PreviewID  string
-	OriginID   string
-	Title      string
-	ArtistName string
-	ArtistID   string
-	SourceURL  string
-	Source     string
-	Tags       string
-	Width      int
-	Height     int
-	CreatedAt  int64
+	ID                string
+	PreviewID         string
+	OriginID          string
+	Title             string
+	ArtistName        string
+	ArtistID          string
+	SourceURL         string
+	SourceText        string
+	Source            string
+	Tags              string
+	Width             int
+	Height            int
+	CreatedAt         int64
+	PublishChannelID  int64
+	PublishMessageID  int
+	StorageChannelID  int64
+	StorageMessageID  int
+	DiscussionGroupID int64
+	DiscussionMsgID   int
 }
 
 type AdminImageCounts struct {
@@ -103,10 +110,33 @@ func (c *Client) exec(ctx context.Context, sql string, params ...interface{}) ([
 
 func (c *Client) EnsureSchema(ctx context.Context) error {
 	stmts := []string{
-		"CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, preview_id TEXT, origin_id TEXT, title TEXT, artist_name TEXT, artist_id TEXT, source_url TEXT, source TEXT, tags TEXT, created_at INTEGER, width INTEGER, height INTEGER, status TEXT NOT NULL DEFAULT 'active')",
+		`CREATE TABLE IF NOT EXISTS images (
+		  id TEXT PRIMARY KEY,
+		  preview_id TEXT,
+		  origin_id TEXT,
+		  title TEXT,
+		  artist_name TEXT,
+		  artist_id TEXT,
+		  source_url TEXT,
+		  source_text TEXT,
+		  source TEXT,
+		  tags TEXT,
+		  created_at INTEGER,
+		  width INTEGER,
+		  height INTEGER,
+		  publish_channel_id INTEGER,
+		  publish_message_id INTEGER,
+		  storage_channel_id INTEGER,
+		  storage_message_id INTEGER,
+		  discussion_group_id INTEGER,
+		  discussion_message_id INTEGER,
+		  status TEXT NOT NULL DEFAULT 'active'
+		)`,
 		"CREATE INDEX IF NOT EXISTS idx_images_created_at ON images(created_at)",
 		"CREATE INDEX IF NOT EXISTS idx_images_artist ON images(artist_name)",
 		"CREATE INDEX IF NOT EXISTS idx_images_status_created_at ON images(status, created_at)",
+		"CREATE INDEX IF NOT EXISTS idx_images_publish_message ON images(publish_channel_id, publish_message_id)",
+		"CREATE INDEX IF NOT EXISTS idx_images_storage_message ON images(storage_channel_id, storage_message_id)",
 		"CREATE TABLE IF NOT EXISTS favorites (image_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL)",
 		"CREATE INDEX IF NOT EXISTS idx_favorites_created_at ON favorites(created_at)",
 		"CREATE TABLE IF NOT EXISTS ingest_blocklist (block_key TEXT PRIMARY KEY, reason TEXT, created_at INTEGER NOT NULL)",
@@ -125,15 +155,33 @@ func (c *Client) EnsureSchema(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	hasStatus := false
+
+	has := make(map[string]bool, len(cols))
 	for _, col := range cols {
-		if name, ok := col["name"].(string); ok && strings.EqualFold(name, "status") {
-			hasStatus = true
-			break
+		if name, ok := col["name"].(string); ok {
+			has[strings.ToLower(strings.TrimSpace(name))] = true
 		}
 	}
-	if !hasStatus {
-		if _, err := c.exec(ctx, "ALTER TABLE images ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"); err != nil {
+
+	alterStmts := []struct {
+		col string
+		sql string
+	}{
+		{col: "status", sql: "ALTER TABLE images ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"},
+		{col: "source_text", sql: "ALTER TABLE images ADD COLUMN source_text TEXT"},
+		{col: "publish_channel_id", sql: "ALTER TABLE images ADD COLUMN publish_channel_id INTEGER"},
+		{col: "publish_message_id", sql: "ALTER TABLE images ADD COLUMN publish_message_id INTEGER"},
+		{col: "storage_channel_id", sql: "ALTER TABLE images ADD COLUMN storage_channel_id INTEGER"},
+		{col: "storage_message_id", sql: "ALTER TABLE images ADD COLUMN storage_message_id INTEGER"},
+		{col: "discussion_group_id", sql: "ALTER TABLE images ADD COLUMN discussion_group_id INTEGER"},
+		{col: "discussion_message_id", sql: "ALTER TABLE images ADD COLUMN discussion_message_id INTEGER"},
+	}
+
+	for _, item := range alterStmts {
+		if has[item.col] {
+			continue
+		}
+		if _, err := c.exec(ctx, item.sql); err != nil {
 			return err
 		}
 	}
@@ -142,7 +190,17 @@ func (c *Client) EnsureSchema(ctx context.Context) error {
 }
 
 func (c *Client) InsertImage(ctx context.Context, img Image) error {
-	sql := "INSERT OR IGNORE INTO images (id, preview_id, origin_id, title, artist_name, artist_id, source_url, source, tags, created_at, width, height, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+	sql := `INSERT OR IGNORE INTO images (
+		id, preview_id, origin_id,
+		title, artist_name, artist_id,
+		source_url, source_text, source, tags,
+		created_at, width, height,
+		publish_channel_id, publish_message_id,
+		storage_channel_id, storage_message_id,
+		discussion_group_id, discussion_message_id,
+		status
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
 	_, err := c.exec(ctx, sql,
 		img.ID,
 		img.PreviewID,
@@ -151,11 +209,18 @@ func (c *Client) InsertImage(ctx context.Context, img Image) error {
 		img.ArtistName,
 		img.ArtistID,
 		img.SourceURL,
+		img.SourceText,
 		img.Source,
 		img.Tags,
 		img.CreatedAt,
 		img.Width,
 		img.Height,
+		img.PublishChannelID,
+		img.PublishMessageID,
+		img.StorageChannelID,
+		img.StorageMessageID,
+		img.DiscussionGroupID,
+		img.DiscussionMsgID,
 		"active",
 	)
 	return err

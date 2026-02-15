@@ -10,6 +10,9 @@ import (
 type Config struct {
 	BotToken                 string
 	ChannelID                int64
+	PublishChannelID         int64
+	StorageChannelID         int64
+	DiscussionGroupID        int64
 	AdminPassword            string
 	BackupEnabled            bool
 	BackupWebDAVURL          string
@@ -86,6 +89,44 @@ func Load() *Config {
 		} else {
 			log.Printf("invalid CHANNEL_ID: %v", err)
 		}
+	}
+
+	publishStr := os.Getenv("PUBLISH_CHANNEL_ID")
+	if publishStr != "" {
+		if id, err := strconv.ParseInt(publishStr, 10, 64); err == nil {
+			cfg.PublishChannelID = id
+		} else {
+			log.Printf("invalid PUBLISH_CHANNEL_ID: %v", err)
+		}
+	}
+
+	storageStr := os.Getenv("STORAGE_CHANNEL_ID")
+	if storageStr != "" {
+		if id, err := strconv.ParseInt(storageStr, 10, 64); err == nil {
+			cfg.StorageChannelID = id
+		} else {
+			log.Printf("invalid STORAGE_CHANNEL_ID: %v", err)
+		}
+	}
+
+	groupStr := os.Getenv("DISCUSSION_GROUP_ID")
+	if groupStr != "" {
+		if id, err := strconv.ParseInt(groupStr, 10, 64); err == nil {
+			cfg.DiscussionGroupID = id
+		} else {
+			log.Printf("invalid DISCUSSION_GROUP_ID: %v", err)
+		}
+	}
+
+	// Backward compatibility: if new split-channel vars are not set, keep old single-channel behavior.
+	if cfg.PublishChannelID == 0 {
+		cfg.PublishChannelID = cfg.ChannelID
+	}
+	if cfg.StorageChannelID == 0 {
+		cfg.StorageChannelID = cfg.ChannelID
+	}
+	if cfg.ChannelID == 0 {
+		cfg.ChannelID = cfg.PublishChannelID
 	}
 
 	return cfg

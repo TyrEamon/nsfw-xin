@@ -1,0 +1,198 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"html"
+	"log"
+	"strings"
+	"unicode/utf8"
+
+	"pixiv-tg-gallery/internal/database"
+	"pixiv-tg-gallery/internal/telegram"
+)
+
+type imagePublishMeta struct {
+	ID         string
+	Title      string
+	ArtistName string
+	ArtistID   string
+	SourceURL  string
+	SourceText string
+	Source     string
+	Tags       string
+	CreatedAt  int64
+}
+
+func (a *App) publishImage(ctx context.Context, data []byte, meta imagePublishMeta) (database.Image, error) {
+	meta = normalizePublishMeta(meta)
+
+	result, err := a.TG.SendArtwork(ctx, data, telegram.SendOptions{
+		PreviewCaption: buildPreviewCaption(meta),
+		OriginCaption:  "Original",
+	})
+	if err != nil {
+		return database.Image{}, err
+	}
+
+	if isNoneLike(meta.SourceURL) && result.StorageMsgID > 0 {
+		meta.SourceURL = channelMessageLink(a.Cfg.StorageChannelID, result.StorageMsgID)
+	}
+
+	discussionMsgID := 0
+	if a.Cfg.DiscussionGroupID != 0 {
+		comment := buildDiscussionComment(meta, a.Cfg.StorageChannelID, result.StorageMsgID)
+		if comment != "" {
+			msgID, commentErr := a.TG.SendDiscussionComment(ctx, result.PublishMsgID, comment)
+			discussionMsgID = msgID
+			if commentErr != nil {
+				log.Printf("discussion comment warning id=%s publish_msg_id=%d err=%v", meta.ID, result.PublishMsgID, commentErr)
+			}
+		}
+	}
+
+	img := database.Image{
+		ID:                meta.ID,
+		PreviewID:         result.PreviewID,
+		OriginID:          result.OriginID,
+		Title:             meta.Title,
+		ArtistName:        meta.ArtistName,
+		ArtistID:          meta.ArtistID,
+		SourceURL:         meta.SourceURL,
+		SourceText:        meta.SourceText,
+		Source:            meta.Source,
+		Tags:              meta.Tags,
+		Width:             result.Width,
+		Height:            result.Height,
+		CreatedAt:         meta.CreatedAt,
+		PublishChannelID:  a.Cfg.PublishChannelID,
+		PublishMessageID:  result.PublishMsgID,
+		StorageChannelID:  a.Cfg.StorageChannelID,
+		StorageMessageID:  result.StorageMsgID,
+		DiscussionGroupID: a.Cfg.DiscussionGroupID,
+		DiscussionMsgID:   discussionMsgID,
+	}
+
+	if err := a.DB.InsertImage(ctx, img); err != nil {
+		return database.Image{}, err
+	}
+	a.enqueueBackup(ctx, img.ID)
+	return img, nil
+}
+
+func normalizePublishMeta(meta imagePublishMeta) imagePublishMeta {
+	meta.ID = strings.TrimSpace(meta.ID)
+	meta.Title = clipRunes(strings.TrimSpace(meta.Title), 120)
+	meta.ArtistName = clipRunes(strings.TrimSpace(meta.ArtistName), 80)
+	meta.ArtistID = strings.TrimSpace(meta.ArtistID)
+	meta.SourceURL = strings.TrimSpace(meta.SourceURL)
+	meta.SourceText = clipRunes(strings.TrimSpace(meta.SourceText), 500)
+	meta.Source = strings.TrimSpace(meta.Source)
+	meta.Tags = strings.TrimSpace(meta.Tags)
+	if meta.Title == "" {
+		meta.Title = "Untitled"
+	}
+	if meta.ArtistName == "" {
+		meta.ArtistName = "Arts"
+	}
+	if meta.ArtistID == "" {
+		meta.ArtistID = "none"
+	}
+	if meta.SourceURL == "" {
+		meta.SourceURL = "none"
+	}
+	if meta.Source == "" {
+		meta.Source = "unknown"
+	}
+	return meta
+}
+
+func buildPreviewCaption(meta imagePublishMeta) string {
+	title := html.EscapeString(meta.Title)
+	artist := html.EscapeString(meta.ArtistName)
+	sourceURL := strings.TrimSpace(meta.SourceURL)
+
+	header := fmt.Sprintf("%s / %s", title, artist)
+	if !isNoneLike(sourceURL) {
+		header = fmt.Sprintf("%s(%s) / %s", title, html.EscapeString(sourceURL), artist)
+	}
+
+	parts := []string{header}
+	if meta.SourceText != "" {
+		parts = append(parts, "<blockquote>"+html.EscapeString(meta.SourceText)+"</blockquote>")
+	}
+	tagLine := buildTagLine(meta.Tags)
+	if tagLine != "" {
+		parts = append(parts, "<blockquote>"+html.EscapeString(tagLine)+"</blockquote>")
+	}
+
+	caption := strings.Join(parts, "\n")
+	if utf8.RuneCountInString(caption) > 950 {
+		caption = clipRunes(caption, 950)
+	}
+	return caption
+}
+
+func buildDiscussionComment(meta imagePublishMeta, storageChannelID int64, storageMsgID int) string {
+	if storageMsgID <= 0 {
+		return ""
+	}
+	originURL := channelMessageLink(storageChannelID, storageMsgID)
+	lines := []string{
+		fmt.Sprintf("原图：<a href=\"%s\">点击查看</a>", html.EscapeString(originURL)),
+	}
+
+	if !isNoneLike(meta.SourceURL) {
+		lines = append(lines, fmt.Sprintf("原链接：<a href=\"%s\">%s</a>", html.EscapeString(meta.SourceURL), html.EscapeString(meta.SourceURL)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func buildTagLine(tags string) string {
+	if strings.TrimSpace(tags) == "" {
+		return ""
+	}
+	fields := strings.Fields(tags)
+	if len(fields) == 0 {
+		return ""
+	}
+
+	seen := make(map[string]struct{}, len(fields))
+	out := make([]string, 0, len(fields))
+	total := 0
+	for _, f := range fields {
+		tag := strings.TrimSpace(strings.TrimLeft(f, "#"))
+		if tag == "" {
+			continue
+		}
+		key := strings.ToLower(tag)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		item := "#" + tag
+		if total+len(item)+1 > 320 {
+			break
+		}
+		out = append(out, item)
+		total += len(item) + 1
+	}
+	return strings.Join(out, " ")
+}
+
+func clipRunes(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if max <= 0 || s == "" {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
+}
+
+func isNoneLike(v string) bool {
+	v = strings.TrimSpace(strings.ToLower(v))
+	return v == "" || v == "none" || v == "-"
+}
