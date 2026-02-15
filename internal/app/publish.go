@@ -121,7 +121,7 @@ func buildPreviewCaption(meta imagePublishMeta) string {
 
 	header := fmt.Sprintf("%s / %s", title, artist)
 	if !isNoneLike(sourceURL) {
-		header = fmt.Sprintf("%s(%s) / %s", title, html.EscapeString(sourceURL), artist)
+		header = fmt.Sprintf("<a href=\"%s\">%s</a> / %s", html.EscapeString(sourceURL), title, artist)
 	}
 
 	parts := []string{header}
