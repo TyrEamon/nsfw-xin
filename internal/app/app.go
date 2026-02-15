@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"pixiv-tg-gallery/internal/config"
@@ -20,6 +21,10 @@ type App struct {
 	DB    *database.Client
 	TG    *telegram.Client
 	Pixiv *pixiv.Client
+
+	discussionMu       sync.Mutex
+	pendingDiscussion  map[int]pendingDiscussionComment
+	observedDiscussion map[int]discussionRelay
 }
 
 const pixivBootstrapStateKey = "pixiv_bootstrap_done"
@@ -32,7 +37,14 @@ type TGIngestResult struct {
 }
 
 func New(cfg *config.Config, db *database.Client, tg *telegram.Client, pv *pixiv.Client) *App {
-	return &App{Cfg: cfg, DB: db, TG: tg, Pixiv: pv}
+	return &App{
+		Cfg:                cfg,
+		DB:                 db,
+		TG:                 tg,
+		Pixiv:              pv,
+		pendingDiscussion:  make(map[int]pendingDiscussionComment),
+		observedDiscussion: make(map[int]discussionRelay),
+	}
 }
 
 func (a *App) HandleUpload(ctx context.Context, data []byte) error {
@@ -53,7 +65,11 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 	if msg == nil {
 		return nil, nil
 	}
-	if msg.Chat.ID == a.Cfg.PublishChannelID || msg.Chat.ID == a.Cfg.StorageChannelID || msg.Chat.ID == a.Cfg.DiscussionGroupID {
+	if msg.Chat.ID == a.Cfg.DiscussionGroupID {
+		a.HandleDiscussionRelay(ctx, msg)
+		return nil, nil
+	}
+	if msg.Chat.ID == a.Cfg.PublishChannelID || msg.Chat.ID == a.Cfg.StorageChannelID {
 		return nil, nil
 	}
 
@@ -110,6 +126,9 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 func (a *App) CanHandleTGMessage(msg *models.Message) bool {
 	if msg == nil {
 		return false
+	}
+	if msg.Chat.ID == a.Cfg.DiscussionGroupID && msg.IsAutomaticForward {
+		return true
 	}
 	if len(msg.Photo) > 0 || msg.Document != nil {
 		return true

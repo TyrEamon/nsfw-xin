@@ -284,6 +284,27 @@ func (c *Client) SendPreviewMediaGroup(ctx context.Context, items []PreviewMedia
 	return results, nil
 }
 
+func (c *Client) SendDiscussionReply(ctx context.Context, discussionMessageID int, text string, buttons DiscussionButtons) (int, error) {
+	disablePreview := true
+	replyMarkup := buildDiscussionReplyMarkup(buttons)
+
+	msg, err := c.Bot.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:      c.DiscussionGroupID,
+		Text:        text,
+		ReplyMarkup: replyMarkup,
+		ReplyParameters: &models.ReplyParameters{
+			MessageID: discussionMessageID,
+		},
+		LinkPreviewOptions: &models.LinkPreviewOptions{
+			IsDisabled: &disablePreview,
+		},
+	})
+	if err != nil {
+		return 0, err
+	}
+	return msg.ID, nil
+}
+
 func (c *Client) SendDiscussionComment(ctx context.Context, publishMessageID int, text string, buttons DiscussionButtons) (int, error) {
 	disablePreview := true
 	replyMarkup := buildDiscussionReplyMarkup(buttons)

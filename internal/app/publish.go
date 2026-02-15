@@ -51,7 +51,7 @@ func (a *App) sendDiscussionComment(ctx context.Context, meta imagePublishMeta, 
 		DetailsURL: channelMessageLink(a.Cfg.PublishChannelID, publishMsgID),
 		OriginURL:  channelMessageLink(a.Cfg.StorageChannelID, storageMsgID),
 	}
-	msgID, err := a.TG.SendDiscussionComment(ctx, publishMsgID, comment, buttons)
+	msgID, err := a.queueOrSendDiscussionComment(ctx, publishMsgID, comment, buttons)
 	if err != nil {
 		log.Printf("discussion comment warning id=%s publish_msg_id=%d err=%v", meta.ID, publishMsgID, err)
 	}
