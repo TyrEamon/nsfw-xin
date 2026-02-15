@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -35,6 +36,9 @@ type Client struct {
 	PublishChannelID  int64
 	StorageChannelID  int64
 	DiscussionGroupID int64
+
+	previewMu         sync.RWMutex
+	previewHasSpoiler bool
 }
 
 type SendOptions struct {
@@ -83,6 +87,19 @@ func New(token string, publishChannelID, storageChannelID, discussionGroupID int
 		StorageChannelID:  storageChannelID,
 		DiscussionGroupID: discussionGroupID,
 	}, nil
+}
+
+func (c *Client) SetPreviewHasSpoiler(v bool) {
+	c.previewMu.Lock()
+	c.previewHasSpoiler = v
+	c.previewMu.Unlock()
+}
+
+func (c *Client) GetPreviewHasSpoiler() bool {
+	c.previewMu.RLock()
+	v := c.previewHasSpoiler
+	c.previewMu.RUnlock()
+	return v
 }
 
 func (c *Client) DownloadFile(ctx context.Context, fileID string) ([]byte, string, error) {
@@ -182,10 +199,11 @@ func (c *Client) SendPreviewPhoto(ctx context.Context, data []byte, caption stri
 	}
 
 	publishMsg, err := c.Bot.SendPhoto(ctx, &bot.SendPhotoParams{
-		ChatID:    c.PublishChannelID,
-		Photo:     &models.InputFileUpload{Filename: "preview.jpg", Data: bytes.NewReader(previewData)},
-		Caption:   caption,
-		ParseMode: models.ParseModeHTML,
+		ChatID:     c.PublishChannelID,
+		Photo:      &models.InputFileUpload{Filename: "preview.jpg", Data: bytes.NewReader(previewData)},
+		Caption:    caption,
+		ParseMode:  models.ParseModeHTML,
+		HasSpoiler: c.GetPreviewHasSpoiler(),
 	})
 	if err != nil {
 		return PreviewSendResult{}, err
@@ -257,6 +275,7 @@ func (c *Client) SendPreviewMediaGroup(ctx context.Context, items []PreviewMedia
 			input.Caption = caption
 			input.ParseMode = models.ParseModeHTML
 		}
+		input.HasSpoiler = c.GetPreviewHasSpoiler()
 		media = append(media, input)
 
 		results[i].Width = width

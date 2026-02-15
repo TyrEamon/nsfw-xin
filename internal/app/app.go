@@ -22,6 +22,9 @@ type App struct {
 	TG    *telegram.Client
 	Pixiv *pixiv.Client
 
+	groupMu         sync.Mutex
+	tgGroupSessions map[int64]tgGroupSession
+
 	discussionMu       sync.Mutex
 	pendingDiscussion  map[int]pendingDiscussionComment
 	observedDiscussion map[int]discussionRelay
@@ -42,6 +45,7 @@ func New(cfg *config.Config, db *database.Client, tg *telegram.Client, pv *pixiv
 		DB:                 db,
 		TG:                 tg,
 		Pixiv:              pv,
+		tgGroupSessions:    make(map[int64]tgGroupSession),
 		pendingDiscussion:  make(map[int]pendingDiscussionComment),
 		observedDiscussion: make(map[int]discussionRelay),
 	}
@@ -80,6 +84,14 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 		}
 	}
 
+	if action, ok := parseSpoilerCommand(msg.Text); ok {
+		return a.handleSpoilerCommand(ctx, msg, action)
+	}
+
+	if cmd, ok := parseTGGroupCommand(msg.Text); ok {
+		return a.handleTGGroupCommand(ctx, msg, cmd)
+	}
+
 	title := strings.TrimSpace(msg.Caption)
 	if title == "" {
 		title = strings.TrimSpace(msg.Text)
@@ -102,6 +114,14 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 
 	if !a.isTGIngestAuthorized(msg) {
 		return &TGIngestResult{Summary: "No publish permission."}, nil
+	}
+
+	if fileID != "" {
+		if queued, count, err := a.appendTGGroupItem(msg, fileID, title); err != nil {
+			return &TGIngestResult{Summary: "Group queue failed: " + err.Error()}, nil
+		} else if queued {
+			return &TGIngestResult{Summary: fmt.Sprintf("Group queued: %d", count)}, nil
+		}
 	}
 
 	if fileID == "" {
@@ -143,6 +163,12 @@ func (a *App) CanHandleTGMessage(msg *models.Message) bool {
 		return true
 	}
 	if _, ok := parseStartPayload(msg.Text); ok {
+		return true
+	}
+	if _, ok := parseSpoilerCommand(msg.Text); ok {
+		return true
+	}
+	if _, ok := parseTGGroupCommand(msg.Text); ok {
 		return true
 	}
 	if len(msg.Photo) > 0 || msg.Document != nil {

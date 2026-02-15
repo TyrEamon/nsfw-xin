@@ -18,6 +18,7 @@ type Config struct {
 	OriginLinkSecret         string
 	OriginLinkTTLSeconds     int
 	TGAllowedUserIDs         map[int64]struct{}
+	PreviewHasSpoiler        bool
 	BackupEnabled            bool
 	BackupWebDAVURL          string
 	BackupWebDAVUsername     string
@@ -58,6 +59,7 @@ func Load() *Config {
 		OriginLinkSecret:         os.Getenv("ORIGIN_LINK_SECRET"),
 		OriginLinkTTLSeconds:     getEnvInt("ORIGIN_LINK_TTL_SECONDS", 604800),
 		TGAllowedUserIDs:         parseIDSet(os.Getenv("TG_ALLOWED_USER_IDS")),
+		PreviewHasSpoiler:        getEnvBool("TG_PREVIEW_HAS_SPOILER", false),
 		BackupEnabled:            getEnvBool("BACKUP_ENABLED", false),
 		BackupWebDAVURL:          getEnvString("BACKUP_WEBDAV_URL", ""),
 		BackupWebDAVUsername:     os.Getenv("BACKUP_WEBDAV_USERNAME"),
