@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -21,12 +22,14 @@ const (
 )
 
 var (
-	urlPattern       = regexp.MustCompile(`https?://[^\s]+`)
-	pixivIDPattern   = regexp.MustCompile(`^\d+$`)
-	yandeIDPattern   = regexp.MustCompile(`^\d+$`)
-	twitterIDPattern = regexp.MustCompile(`^\d+$`)
-	hashtagPattern   = regexp.MustCompile(`#([A-Za-z0-9_]+)`)
-	punctuationTrim  = ".,;:!?)]}>'\"\uFF0C\u3002\uFF01\uFF1F\u3001\uFF09\u3011\u300B"
+	urlPattern        = regexp.MustCompile(`https?://[^\s]+`)
+	pixivIDPattern    = regexp.MustCompile(`^\d+$`)
+	yandeIDPattern    = regexp.MustCompile(`^\d+$`)
+	twitterIDPattern  = regexp.MustCompile(`^\d+$`)
+	hashtagPattern    = regexp.MustCompile(`#([A-Za-z0-9_]+)`)
+	pixivBRTagPattern = regexp.MustCompile(`(?i)<br\s*/?>`)
+	htmlTagPattern    = regexp.MustCompile(`(?s)<[^>]+>`)
+	punctuationTrim   = ".,;:!?)]}>'\"\uFF0C\u3002\uFF01\uFF1F\u3001\uFF09\u3011\u300B"
 )
 
 type linkType string
@@ -432,6 +435,7 @@ func (a *App) ingestPixivArtwork(ctx context.Context, id string, sourceURL strin
 		ArtistName: detail.Body.UserName,
 		ArtistID:   detail.Body.UserID,
 		SourceURL:  sourceURL,
+		SourceText: pixivDescriptionToText(detail.Body.Description),
 		Source:     "pixiv",
 		Tags:       strings.Join(tags, " "),
 	}
@@ -634,6 +638,38 @@ func truncateRunes(s string, limit int) string {
 		return string(r)
 	}
 	return string(r[:limit])
+}
+
+func pixivDescriptionToText(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	text := pixivBRTagPattern.ReplaceAllString(raw, "\n")
+	text = htmlTagPattern.ReplaceAllString(text, "")
+	text = html.UnescapeString(text)
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	blank := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if blank {
+				continue
+			}
+			blank = true
+			out = append(out, "")
+			continue
+		}
+		blank = false
+		out = append(out, line)
+	}
+
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
 func extractHashTags(text string) []string {
