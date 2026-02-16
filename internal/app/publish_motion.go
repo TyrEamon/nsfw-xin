@@ -13,14 +13,14 @@ func (a *App) publishMotionNoDB(ctx context.Context, data []byte, filename strin
 	if err != nil {
 		return err
 	}
-	_, storageMsgID, err := a.TG.SendOriginDocumentWithFilename(ctx, data, filename, "Original")
+	originID, storageMsgID, err := a.TG.SendOriginDocumentWithFilename(ctx, data, filename, "Original")
 	if err != nil {
 		return err
 	}
 
 	commentMeta := meta
 	commentMeta.ID = ""
-	a.sendDiscussionComment(ctx, commentMeta, previewRes.PublishMsgID, storageMsgID)
+	a.sendDiscussionComment(ctx, commentMeta, previewRes.PublishMsgID, originID, storageMsgID)
 	return nil
 }
 

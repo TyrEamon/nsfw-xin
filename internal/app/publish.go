@@ -42,18 +42,19 @@ func (a *App) publishImage(ctx context.Context, data []byte, meta imagePublishMe
 		return database.Image{}, err
 	}
 
-	discussionMsgID := a.sendDiscussionComment(ctx, meta, result.PublishMsgID, result.StorageMsgID)
+	discussionMsgID := a.sendDiscussionComment(ctx, meta, result.PublishMsgID, result.OriginID, result.StorageMsgID)
 	return a.persistPublishedImage(ctx, meta, result, discussionMsgID)
 }
 
 type discussionOriginLink struct {
 	ImageID      string
+	OriginID     string
 	StorageMsgID int
 	Label        string
 }
 
-func (a *App) sendDiscussionComment(ctx context.Context, meta imagePublishMeta, publishMsgID, storageMsgID int) int {
-	origins := []discussionOriginLink{{ImageID: meta.ID, StorageMsgID: storageMsgID, Label: "\u539f\u56fe"}}
+func (a *App) sendDiscussionComment(ctx context.Context, meta imagePublishMeta, publishMsgID int, originID string, storageMsgID int) int {
+	origins := []discussionOriginLink{{ImageID: meta.ID, OriginID: originID, StorageMsgID: storageMsgID, Label: "\u539f\u56fe"}}
 	return a.sendDiscussionCommentWithOrigins(ctx, meta, publishMsgID, origins)
 }
 
@@ -68,10 +69,18 @@ func (a *App) sendDiscussionCommentWithOrigins(ctx context.Context, meta imagePu
 
 	buttons := telegram.DiscussionButtons{DetailsURL: channelMessageLink(a.Cfg.PublishChannelID, publishMsgID)}
 	originButtons := a.buildDiscussionOriginButtons(origins)
-	if len(originButtons) == 1 {
+	if len(origins) > 1 {
+		if bundleURL, err := a.buildOriginBundleURL(ctx, origins); err != nil {
+			log.Printf("discussion origin bundle warning id=%s publish_msg_id=%d err=%v", meta.ID, publishMsgID, err)
+		} else if strings.TrimSpace(bundleURL) != "" {
+			buttons.OriginURL = bundleURL
+		} else if len(originButtons) == 1 {
+			buttons.OriginURL = originButtons[0].URL
+		} else if len(originButtons) > 1 {
+			buttons.OriginButtons = originButtons
+		}
+	} else if len(originButtons) == 1 {
 		buttons.OriginURL = originButtons[0].URL
-	} else if len(originButtons) > 1 {
-		buttons.OriginButtons = originButtons
 	}
 
 	msgID, err := a.queueOrSendDiscussionComment(ctx, publishMsgID, comment, buttons)
@@ -91,7 +100,7 @@ func (a *App) buildDiscussionOriginButtons(origins []discussionOriginLink) []tel
 		if len(buttons) >= maxDiscussionOriginButtons {
 			break
 		}
-		url := a.buildOriginButtonURL(origin.ImageID, origin.StorageMsgID)
+		url := a.buildOriginButtonURL(origin.ImageID, origin.OriginID, origin.StorageMsgID)
 		if strings.TrimSpace(url) == "" {
 			continue
 		}

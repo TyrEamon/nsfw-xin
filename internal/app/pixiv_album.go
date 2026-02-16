@@ -134,6 +134,7 @@ func (a *App) ingestPixivAlbumCandidates(ctx context.Context, artworkID string, 
 			for i, page := range prepared {
 				originLinks = append(originLinks, discussionOriginLink{
 					ImageID:      page.Candidate.PID,
+					OriginID:     page.OriginID,
 					StorageMsgID: page.StorageMsgID,
 					Label:        fmt.Sprintf("\u539f\u56fe%d", i+1),
 				})

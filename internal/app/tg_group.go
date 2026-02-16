@@ -358,6 +358,7 @@ func (a *App) publishTGGroupImageOnly(ctx context.Context, session tgGroupSessio
 			for i, item := range group {
 				originLinks = append(originLinks, discussionOriginLink{
 					ImageID:      item.ID,
+					OriginID:     item.OriginID,
 					StorageMsgID: item.StorageMsgID,
 					Label:        fmt.Sprintf("\u539f\u56fe%d", i+1),
 				})
@@ -483,6 +484,7 @@ func (a *App) publishTGGroupMixed(ctx context.Context, session tgGroupSession, s
 		}
 		originLinks = append(originLinks, discussionOriginLink{
 			ImageID:      item.Prepared.ID,
+			OriginID:     item.Prepared.OriginID,
 			StorageMsgID: item.Prepared.StorageMsgID,
 			Label:        fmt.Sprintf("\u539f\u56fe%d", len(originLinks)+1),
 		})

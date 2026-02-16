@@ -398,6 +398,7 @@ func (a *App) ingestYandePosts(ctx context.Context, item supportedLink, posts []
 			for i, page := range group {
 				originLinks = append(originLinks, discussionOriginLink{
 					ImageID:      page.PID,
+					OriginID:     page.OriginID,
 					StorageMsgID: page.StorageMsgID,
 					Label:        fmt.Sprintf("\u539f\u56fe%d", i+1),
 				})
