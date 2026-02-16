@@ -14,6 +14,9 @@ type Config struct {
 	StorageChannelID         int64
 	DiscussionGroupID        int64
 	AdminPassword            string
+	BotUsername              string
+	OriginLinkSecret         string
+	OriginLinkTTLSeconds     int
 	BackupEnabled            bool
 	BackupWebDAVURL          string
 	BackupWebDAVUsername     string
@@ -50,6 +53,9 @@ func Load() *Config {
 	cfg := &Config{
 		BotToken:                 os.Getenv("BOT_TOKEN"),
 		AdminPassword:            os.Getenv("ADMIN_PASSWORD"),
+		BotUsername:              strings.TrimPrefix(getEnvString("BOT_USERNAME", ""), "@"),
+		OriginLinkSecret:         os.Getenv("ORIGIN_LINK_SECRET"),
+		OriginLinkTTLSeconds:     getEnvInt("ORIGIN_LINK_TTL_SECONDS", 604800),
 		BackupEnabled:            getEnvBool("BACKUP_ENABLED", false),
 		BackupWebDAVURL:          getEnvString("BACKUP_WEBDAV_URL", ""),
 		BackupWebDAVUsername:     os.Getenv("BACKUP_WEBDAV_USERNAME"),
@@ -127,6 +133,9 @@ func Load() *Config {
 	}
 	if cfg.ChannelID == 0 {
 		cfg.ChannelID = cfg.PublishChannelID
+	}
+	if cfg.OriginLinkTTLSeconds < 0 {
+		cfg.OriginLinkTTLSeconds = 604800
 	}
 
 	return cfg

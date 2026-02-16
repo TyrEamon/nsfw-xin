@@ -73,6 +73,13 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 		return nil, nil
 	}
 
+	if payload, isStart := parseStartPayload(msg.Text); isStart {
+		result, handled, err := a.handleStartPayload(ctx, msg, payload)
+		if handled {
+			return result, err
+		}
+	}
+
 	title := strings.TrimSpace(msg.Caption)
 	if title == "" {
 		title = strings.TrimSpace(msg.Text)
@@ -128,6 +135,9 @@ func (a *App) CanHandleTGMessage(msg *models.Message) bool {
 		return false
 	}
 	if msg.Chat.ID == a.Cfg.DiscussionGroupID && msg.IsAutomaticForward {
+		return true
+	}
+	if _, ok := parseStartPayload(msg.Text); ok {
 		return true
 	}
 	if len(msg.Photo) > 0 || msg.Document != nil {

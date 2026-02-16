@@ -284,6 +284,23 @@ func (c *Client) SendPreviewMediaGroup(ctx context.Context, items []PreviewMedia
 	return results, nil
 }
 
+func (c *Client) SendDocumentByFileID(ctx context.Context, chatID int64, fileID, caption string) (int, error) {
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return 0, fmt.Errorf("empty file id")
+	}
+
+	msg, err := c.Bot.SendDocument(ctx, &bot.SendDocumentParams{
+		ChatID:   chatID,
+		Document: &models.InputFileString{Data: fileID},
+		Caption:  strings.TrimSpace(caption),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return msg.ID, nil
+}
+
 func (c *Client) SendDiscussionReply(ctx context.Context, discussionMessageID int, text string, buttons DiscussionButtons) (int, error) {
 	disablePreview := true
 	replyMarkup := buildDiscussionReplyMarkup(buttons)
