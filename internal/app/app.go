@@ -100,37 +100,41 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 		title = "TG"
 	}
 
-	var fileID string
-	if msg.Document != nil {
-		fileID = strings.TrimSpace(msg.Document.FileID)
-	} else if len(msg.Photo) > 0 {
-		fileID = strings.TrimSpace(msg.Photo[len(msg.Photo)-1].FileID)
-	}
-
+	media, hasMedia := extractIncomingMedia(msg)
 	links := extractSupportedLinks(msg.Text, msg.Caption)
-	if fileID == "" && len(links) == 0 {
+	if !hasMedia && len(links) == 0 {
 		return nil, nil
 	}
 
 	if !a.isTGIngestAuthorized(msg) {
-		return &TGIngestResult{Summary: "\u54fc\uff0c\u8fd9\u4e2a\u529f\u80fd\u53ea\u7ed9\u4e3b\u4eba\u548c\u767d\u540d\u5355\u7528\u55b5~"}, nil
+		return &TGIngestResult{Summary: "哼，这个功能只给主人和白名单用喵~"}, nil
 	}
 
-	if fileID != "" {
-		if queued, count, err := a.appendTGGroupItem(msg, fileID, title); err != nil {
-			return &TGIngestResult{Summary: "\u6392\u961f\u5931\u8d25\u4e86\u55b5\uff1a" + err.Error()}, nil
+	if hasMedia {
+		if queued, count, err := a.appendTGGroupItem(msg, media, title); err != nil {
+			return &TGIngestResult{Summary: "排队失败了喵：" + err.Error()}, nil
 		} else if queued {
-			return &TGIngestResult{Summary: fmt.Sprintf("\u6536\u5230\u7b2c %d \u5f20\u4e86\u55b5~", count)}, nil
+			return &TGIngestResult{Summary: fmt.Sprintf("收到第 %d 个文件了喵~", count)}, nil
 		}
 	}
 
-	if fileID == "" {
+	if !hasMedia {
 		return a.handleTGLinks(ctx, links)
 	}
 
-	data, _, err := a.TG.DownloadFile(ctx, fileID)
+	data, _, err := a.TG.DownloadFile(ctx, media.FileID)
 	if err != nil {
 		return nil, err
+	}
+
+	if !media.isImage() {
+		if err := a.publishIncomingMotion(ctx, data, media, title); err != nil {
+			return nil, err
+		}
+		return &TGIngestResult{
+			Title:   title,
+			Summary: fmt.Sprintf("\u54fc\uff0c\u5904\u7406\u597d\u4e86\u55b5~\n\u8fd9\u6b21\u662f%s\uff0c\u5df2\u53d1\u5e03\u5230\u9891\u9053\uff08\u4e0d\u5199\u5165\u56fe\u7ad9\uff09\u3002", media.displayName()),
+		}, nil
 	}
 
 	imgID := fmt.Sprintf("tg_%d_%d", msg.Chat.ID, msg.ID)
@@ -153,6 +157,7 @@ func (a *App) HandleTGMessage(ctx context.Context, msg *models.Message) (*TGInge
 		SourceURL: img.SourceURL,
 		Summary:   fmt.Sprintf("\u54fc\uff0c\u5904\u7406\u597d\u4e86\u55b5~\nID: %s", img.ID),
 	}, nil
+
 }
 
 func (a *App) CanHandleTGMessage(msg *models.Message) bool {
@@ -171,7 +176,7 @@ func (a *App) CanHandleTGMessage(msg *models.Message) bool {
 	if _, ok := parseTGGroupCommand(msg.Text); ok {
 		return true
 	}
-	if len(msg.Photo) > 0 || msg.Document != nil {
+	if len(msg.Photo) > 0 || msg.Document != nil || msg.Video != nil || msg.Animation != nil {
 		return true
 	}
 	return len(extractSupportedLinks(msg.Text, msg.Caption)) > 0

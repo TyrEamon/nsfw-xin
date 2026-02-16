@@ -56,9 +56,15 @@ type SendResult struct {
 	Height          int
 }
 
+type DiscussionLinkButton struct {
+	Text string
+	URL  string
+}
+
 type DiscussionButtons struct {
-	DetailsURL string
-	OriginURL  string
+	DetailsURL    string
+	OriginURL     string
+	OriginButtons []DiscussionLinkButton
 }
 
 type PreviewMedia struct {
@@ -428,17 +434,50 @@ func (c *Client) SendDiscussionComment(ctx context.Context, publishMessageID int
 }
 
 func buildDiscussionReplyMarkup(buttons DiscussionButtons) *models.InlineKeyboardMarkup {
-	rows := make([][]models.InlineKeyboardButton, 0, 1)
-	row := make([]models.InlineKeyboardButton, 0, 2)
-	if buttons.DetailsURL != "" {
-		row = append(row, models.InlineKeyboardButton{Text: "\u8be6\u60c5", URL: buttons.DetailsURL})
+	rows := make([][]models.InlineKeyboardButton, 0, 4)
+	header := make([]models.InlineKeyboardButton, 0, 2)
+
+	if strings.TrimSpace(buttons.DetailsURL) != "" {
+		header = append(header, models.InlineKeyboardButton{Text: "\u8be6\u60c5", URL: strings.TrimSpace(buttons.DetailsURL)})
 	}
-	if buttons.OriginURL != "" {
-		row = append(row, models.InlineKeyboardButton{Text: "\u539f\u56fe", URL: buttons.OriginURL})
+
+	origins := make([]DiscussionLinkButton, 0, 1+len(buttons.OriginButtons))
+	if strings.TrimSpace(buttons.OriginURL) != "" {
+		origins = append(origins, DiscussionLinkButton{Text: "\u539f\u56fe", URL: strings.TrimSpace(buttons.OriginURL)})
 	}
-	if len(row) > 0 {
+	for _, btn := range buttons.OriginButtons {
+		url := strings.TrimSpace(btn.URL)
+		if url == "" {
+			continue
+		}
+		text := strings.TrimSpace(btn.Text)
+		if text == "" {
+			text = fmt.Sprintf("\u539f\u56fe%d", len(origins)+1)
+		}
+		origins = append(origins, DiscussionLinkButton{Text: text, URL: url})
+	}
+
+	if len(origins) > 0 && len(header) < 2 {
+		header = append(header, models.InlineKeyboardButton{Text: origins[0].Text, URL: origins[0].URL})
+		origins = origins[1:]
+	}
+	if len(header) > 0 {
+		rows = append(rows, header)
+	}
+
+	const originPerRow = 3
+	for i := 0; i < len(origins); i += originPerRow {
+		end := i + originPerRow
+		if end > len(origins) {
+			end = len(origins)
+		}
+		row := make([]models.InlineKeyboardButton, 0, end-i)
+		for _, btn := range origins[i:end] {
+			row = append(row, models.InlineKeyboardButton{Text: btn.Text, URL: btn.URL})
+		}
 		rows = append(rows, row)
 	}
+
 	if len(rows) == 0 {
 		return nil
 	}

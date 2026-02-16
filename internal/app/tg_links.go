@@ -10,7 +10,9 @@ import (
 	"net/http"
 	neturl "net/url"
 	"path"
+	"pixiv-tg-gallery/internal/telegram"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -26,7 +28,7 @@ var (
 	pixivIDPattern    = regexp.MustCompile(`^\d+$`)
 	yandeIDPattern    = regexp.MustCompile(`^\d+$`)
 	twitterIDPattern  = regexp.MustCompile(`^\d+$`)
-	hashtagPattern    = regexp.MustCompile(`#([A-Za-z0-9_]+)`)
+	hashtagPattern    = regexp.MustCompile(`#([\p{L}\p{N}_][\p{L}\p{N}_\p{M}]*)`)
 	pixivBRTagPattern = regexp.MustCompile(`(?i)<br\s*/?>`)
 	htmlTagPattern    = regexp.MustCompile(`(?s)<[^>]+>`)
 	punctuationTrim   = ".,;:!?)]}>'\"\uFF0C\u3002\uFF01\uFF1F\u3001\uFF09\u3011\u300B"
@@ -240,57 +242,244 @@ func (a *App) ingestPixivFromLink(ctx context.Context, item supportedLink) (*TGI
 }
 
 func (a *App) ingestYandeFromLink(ctx context.Context, item supportedLink) (*TGIngestResult, error) {
-	imgID := fmt.Sprintf("yande_%s", item.ID)
-	if blocked, err := a.DB.IsBlocked(ctx, imgID); err == nil && blocked {
-		return &TGIngestResult{
-			ID:        imgID,
-			Title:     "Yandex",
-			SourceURL: item.URL,
-			Summary:   fmt.Sprintf("Yande %s skipped: blocked", item.ID),
-		}, nil
-	}
-	if exists, _ := a.DB.Exists(ctx, imgID); exists {
-		return &TGIngestResult{
-			ID:        imgID,
-			Title:     "Yandex",
-			SourceURL: item.URL,
-			Summary:   fmt.Sprintf("Yande %s skipped: already exists", item.ID),
-		}, nil
-	}
-
-	post, err := fetchYandePost(ctx, item.ID)
+	posts, err := fetchYandeFamilyPosts(ctx, item.ID)
 	if err != nil {
 		return nil, err
 	}
-	imgURL := post.bestImageURL()
-	if imgURL == "" {
-		return nil, fmt.Errorf("no downloadable image URL")
+	if len(posts) == 0 {
+		return nil, fmt.Errorf("yande post not found")
 	}
-	data, err := downloadWithHeaders(ctx, imgURL, "https://yande.re/")
+
+	stats, err := a.ingestYandePosts(ctx, item, posts)
 	if err != nil {
 		return nil, err
 	}
 
-	img, err := a.publishImage(ctx, data, imagePublishMeta{
-		ID:         imgID,
-		Title:      "Yandex",
-		ArtistName: "Arts",
-		ArtistID:   "none",
-		SourceURL:  item.URL,
-		Source:     "yande",
-		Tags:       strings.TrimSpace(post.Tags),
-		CreatedAt:  time.Now().Unix(),
-	})
-	if err != nil {
-		return nil, err
-	}
-
+	msg := fmt.Sprintf("Yande %s done: +%d, skipped %d, failed %d", item.ID, stats.Downloaded, stats.Skipped, stats.Failed)
 	return &TGIngestResult{
-		ID:        img.ID,
-		Title:     img.Title,
-		SourceURL: img.SourceURL,
-		Summary:   fmt.Sprintf("Yande %s ingested (+1)", item.ID),
+		ID:        stats.FirstID,
+		Title:     stats.Title,
+		SourceURL: item.URL,
+		Summary:   msg,
 	}, nil
+}
+
+type yandePreparedPost struct {
+	Post         yandePost
+	PID          string
+	Data         []byte
+	OriginID     string
+	StorageMsgID int
+	Width        int
+	Height       int
+}
+
+func (a *App) ingestYandePosts(ctx context.Context, item supportedLink, posts []yandePost) (*ingestStats, error) {
+	stats := &ingestStats{Title: "Yandex"}
+	prepared := make([]yandePreparedPost, 0, len(posts))
+
+	for _, post := range posts {
+		pid := fmt.Sprintf("yande_%d", post.ID)
+		if blocked, err := a.DB.IsBlocked(ctx, pid); err == nil && blocked {
+			stats.Skipped++
+			continue
+		}
+		if exists, _ := a.DB.Exists(ctx, pid); exists {
+			stats.Skipped++
+			continue
+		}
+
+		imgURL := post.bestImageURL()
+		if imgURL == "" {
+			stats.Failed++
+			log.Printf("Yande image URL missing pid=%s", pid)
+			continue
+		}
+
+		data, err := downloadWithHeaders(ctx, imgURL, "https://yande.re/")
+		if err != nil {
+			stats.Failed++
+			log.Printf("Yande download failed pid=%s err=%v", pid, err)
+			continue
+		}
+
+		originID, storageMsgID, err := a.TG.SendOriginDocumentWithFilename(ctx, data, buildYandeOriginFilename(post), "Original")
+		if err != nil {
+			stats.Failed++
+			log.Printf("Yande origin send failed pid=%s err=%v", pid, err)
+			continue
+		}
+
+		width, height := detectImageSize(data)
+		prepared = append(prepared, yandePreparedPost{
+			Post:         post,
+			PID:          pid,
+			Data:         data,
+			OriginID:     originID,
+			StorageMsgID: storageMsgID,
+			Width:        width,
+			Height:       height,
+		})
+		time.Sleep(1200 * time.Millisecond)
+	}
+
+	if len(prepared) == 0 {
+		return stats, nil
+	}
+
+	groups := chunkYandePrepared(prepared, maxPixivAlbumGroup)
+	for groupIdx, group := range groups {
+		isLastGroup := groupIdx == len(groups)-1
+		baseMeta := normalizePublishMeta(imagePublishMeta{
+			Title:      "Yandex",
+			ArtistName: "Arts",
+			ArtistID:   "none",
+			SourceURL:  item.URL,
+			Source:     "yande",
+			Tags:       strings.TrimSpace(group[0].Post.Tags),
+			CreatedAt:  time.Now().Unix(),
+		})
+
+		groupCaption := ""
+		if isLastGroup {
+			groupCaption = buildPreviewCaption(baseMeta)
+		}
+
+		previewItems := make([]telegram.PreviewMedia, 0, len(group))
+		for _, p := range group {
+			previewItems = append(previewItems, telegram.PreviewMedia{
+				Data:     p.Data,
+				Filename: fmt.Sprintf("%s_preview.jpg", p.PID),
+				Width:    p.Width,
+				Height:   p.Height,
+			})
+		}
+
+		previewResults, err := a.TG.SendPreviewMediaGroup(ctx, previewItems, groupCaption)
+		if err != nil {
+			log.Printf("Yande media group failed group=%d err=%v fallback=single_preview", groupIdx+1, err)
+			fallbackGroup := make([]yandePreparedPost, 0, len(group))
+			fallbackPreview := make([]telegram.PreviewSendResult, 0, len(group))
+			for i, p := range group {
+				caption := ""
+				if i == 0 {
+					caption = groupCaption
+				}
+				res, sendErr := a.TG.SendPreviewPhoto(ctx, p.Data, caption)
+				if sendErr != nil {
+					stats.Failed++
+					log.Printf("Yande fallback preview failed pid=%s err=%v", p.PID, sendErr)
+					continue
+				}
+				fallbackGroup = append(fallbackGroup, p)
+				fallbackPreview = append(fallbackPreview, res)
+			}
+			group = fallbackGroup
+			previewResults = fallbackPreview
+		}
+
+		if len(group) == 0 || len(previewResults) == 0 {
+			continue
+		}
+		if len(group) != len(previewResults) {
+			limit := len(group)
+			if len(previewResults) < limit {
+				limit = len(previewResults)
+			}
+			group = group[:limit]
+			previewResults = previewResults[:limit]
+		}
+
+		discussionMsgID := 0
+		if isLastGroup {
+			anchorMeta := baseMeta
+			anchorMeta.ID = group[0].PID
+			originLinks := make([]discussionOriginLink, 0, len(group))
+			for i, page := range group {
+				originLinks = append(originLinks, discussionOriginLink{
+					ImageID:      page.PID,
+					StorageMsgID: page.StorageMsgID,
+					Label:        fmt.Sprintf("\u539f\u56fe%d", i+1),
+				})
+			}
+			discussionMsgID = a.sendDiscussionCommentWithOrigins(ctx, anchorMeta, previewResults[0].PublishMsgID, originLinks)
+		}
+
+		for i, p := range group {
+			meta := baseMeta
+			meta.ID = p.PID
+			meta.Tags = strings.TrimSpace(p.Post.Tags)
+			meta.CreatedAt = time.Now().Unix()
+
+			width := previewResults[i].Width
+			height := previewResults[i].Height
+			if width <= 0 {
+				width = p.Width
+			}
+			if height <= 0 {
+				height = p.Height
+			}
+
+			result := telegram.SendResult{
+				PreviewID:    previewResults[i].PreviewID,
+				OriginID:     p.OriginID,
+				PublishMsgID: previewResults[i].PublishMsgID,
+				StorageMsgID: p.StorageMsgID,
+				Width:        width,
+				Height:       height,
+			}
+
+			img, persistErr := a.persistPublishedImage(ctx, normalizePublishMeta(meta), result, discussionMsgID)
+			if persistErr != nil {
+				stats.Failed++
+				log.Printf("Yande persist failed pid=%s err=%v", p.PID, persistErr)
+				continue
+			}
+			stats.Downloaded++
+			if stats.FirstID == "" {
+				stats.FirstID = img.ID
+			}
+		}
+
+		time.Sleep(1500 * time.Millisecond)
+	}
+
+	return stats, nil
+}
+
+func chunkYandePrepared(items []yandePreparedPost, size int) [][]yandePreparedPost {
+	if len(items) == 0 {
+		return nil
+	}
+	if size <= 0 {
+		size = maxPixivAlbumGroup
+	}
+	out := make([][]yandePreparedPost, 0, (len(items)+size-1)/size)
+	for start := 0; start < len(items); start += size {
+		end := start + size
+		if end > len(items) {
+			end = len(items)
+		}
+		chunk := make([]yandePreparedPost, end-start)
+		copy(chunk, items[start:end])
+		out = append(out, chunk)
+	}
+	return out
+}
+
+func buildYandeOriginFilename(post yandePost) string {
+	ext := ".jpg"
+	raw := strings.TrimSpace(post.bestImageURL())
+	if raw != "" {
+		if u, err := neturl.Parse(raw); err == nil {
+			candidate := strings.ToLower(path.Ext(u.Path))
+			switch candidate {
+			case ".jpg", ".jpeg", ".png", ".webp", ".gif":
+				ext = candidate
+			}
+		}
+	}
+	return fmt.Sprintf("yande_%d%s", post.ID, ext)
 }
 
 func (a *App) ingestTwitterFromLink(ctx context.Context, item supportedLink) (*TGIngestResult, error) {
@@ -420,7 +609,7 @@ func (a *App) ingestTwitterTweet(ctx context.Context, tweetID, sourceURL string)
 		meta := baseMeta
 		meta.ID = ""
 		meta.CreatedAt = time.Now().Unix()
-		if err := a.publishTwitterMotionNoDB(ctx, mediaData, filename, item.isAnimation(), meta); err != nil {
+		if err := a.publishMotionNoDB(ctx, mediaData, filename, item.isAnimation(), meta); err != nil {
 			stats.Failed++
 			log.Printf("Twitter media publish failed pid=%s err=%v", pid, err)
 		} else {
@@ -432,24 +621,6 @@ func (a *App) ingestTwitterTweet(ctx context.Context, tweetID, sourceURL string)
 	}
 
 	return stats, nil
-}
-
-func (a *App) publishTwitterMotionNoDB(ctx context.Context, data []byte, filename string, asAnimation bool, meta imagePublishMeta) error {
-	meta = normalizePublishMeta(meta)
-
-	previewRes, err := a.TG.SendPreviewMotion(ctx, data, filename, buildPreviewCaption(meta), asAnimation)
-	if err != nil {
-		return err
-	}
-	_, storageMsgID, err := a.TG.SendOriginDocumentWithFilename(ctx, data, filename, "Original")
-	if err != nil {
-		return err
-	}
-
-	commentMeta := meta
-	commentMeta.ID = ""
-	a.sendDiscussionComment(ctx, commentMeta, previewRes.PublishMsgID, storageMsgID)
-	return nil
 }
 
 func (a *App) ingestPixivArtwork(ctx context.Context, id string, sourceURL string) (*ingestStats, error) {
@@ -557,12 +728,14 @@ func (a *App) ingestPixivArtwork(ctx context.Context, id string, sourceURL strin
 }
 
 type yandePost struct {
-	ID        int    `json:"id"`
-	FileURL   string `json:"file_url"`
-	JPEGURL   string `json:"jpeg_url"`
-	PNGURL    string `json:"png_url"`
-	SampleURL string `json:"sample_url"`
-	Tags      string `json:"tags"`
+	ID          int    `json:"id"`
+	ParentID    *int   `json:"parent_id"`
+	HasChildren bool   `json:"has_children"`
+	FileURL     string `json:"file_url"`
+	JPEGURL     string `json:"jpeg_url"`
+	PNGURL      string `json:"png_url"`
+	SampleURL   string `json:"sample_url"`
+	Tags        string `json:"tags"`
 }
 
 func (p yandePost) bestImageURL() string {
@@ -848,6 +1021,7 @@ func pixivDescriptionToText(raw string) string {
 }
 
 func extractHashTags(text string) []string {
+	text = strings.ReplaceAll(text, "\uFF03", "#")
 	matches := hashtagPattern.FindAllStringSubmatch(text, -1)
 	if len(matches) == 0 {
 		return nil
@@ -898,8 +1072,13 @@ func buildTwitterImageURL(raw string) string {
 	return u.String()
 }
 
-func fetchYandePost(ctx context.Context, id string) (*yandePost, error) {
-	endpoint := fmt.Sprintf("https://yande.re/post.json?tags=id:%s", id)
+func fetchYandePosts(ctx context.Context, tags string) ([]yandePost, error) {
+	tags = strings.TrimSpace(tags)
+	if tags == "" {
+		return nil, fmt.Errorf("yande tags is empty")
+	}
+
+	endpoint := fmt.Sprintf("https://yande.re/post.json?tags=%s", neturl.QueryEscape(tags))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -921,10 +1100,55 @@ func fetchYandePost(ctx context.Context, id string) (*yandePost, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&arr); err != nil {
 		return nil, err
 	}
+	return arr, nil
+}
+
+func fetchYandePost(ctx context.Context, id string) (*yandePost, error) {
+	arr, err := fetchYandePosts(ctx, fmt.Sprintf("id:%s", strings.TrimSpace(id)))
+	if err != nil {
+		return nil, err
+	}
 	if len(arr) == 0 {
 		return nil, fmt.Errorf("yande post not found")
 	}
 	return &arr[0], nil
+}
+
+func fetchYandeFamilyPosts(ctx context.Context, id string) ([]yandePost, error) {
+	seed, err := fetchYandePost(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	rootID := seed.ID
+	if seed.ParentID != nil && *seed.ParentID > 0 {
+		rootID = *seed.ParentID
+	}
+
+	family, err := fetchYandePosts(ctx, fmt.Sprintf("parent:%d", rootID))
+	if err != nil {
+		return []yandePost{*seed}, nil
+	}
+	if len(family) == 0 {
+		return []yandePost{*seed}, nil
+	}
+
+	merged := make(map[int]yandePost, len(family)+1)
+	for _, post := range family {
+		merged[post.ID] = post
+	}
+	if _, ok := merged[seed.ID]; !ok {
+		merged[seed.ID] = *seed
+	}
+
+	out := make([]yandePost, 0, len(merged))
+	for _, post := range merged {
+		out = append(out, post)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 
 func downloadWithHeaders(ctx context.Context, sourceURL, referer string) ([]byte, error) {

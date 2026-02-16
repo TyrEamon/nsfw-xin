@@ -26,12 +26,16 @@ type tgGroupSession struct {
 
 type tgGroupItem struct {
 	FileID    string
+	Kind      incomingMediaKind
+	Filename  string
 	MessageID int
 	AddedAt   int64
 }
 
 type tgGroupPrepared struct {
 	ID           string
+	Kind         incomingMediaKind
+	Filename     string
 	Data         []byte
 	OriginID     string
 	StorageMsgID int
@@ -101,12 +105,12 @@ func parseTGGroupTitle(text string) string {
 	return strings.TrimSpace(strings.Join(fields[1:], " "))
 }
 
-func (a *App) appendTGGroupItem(msg *models.Message, fileID, title string) (bool, int, error) {
+func (a *App) appendTGGroupItem(msg *models.Message, media incomingMedia, title string) (bool, int, error) {
 	if msg == nil {
 		return false, 0, nil
 	}
-	fileID = strings.TrimSpace(fileID)
-	if fileID == "" {
+	media.FileID = strings.TrimSpace(media.FileID)
+	if media.FileID == "" {
 		return false, 0, nil
 	}
 
@@ -122,7 +126,9 @@ func (a *App) appendTGGroupItem(msg *models.Message, fileID, title string) (bool
 	}
 
 	session.Items = append(session.Items, tgGroupItem{
-		FileID:    fileID,
+		FileID:    media.FileID,
+		Kind:      media.Kind,
+		Filename:  strings.TrimSpace(media.Filename),
 		MessageID: msg.ID,
 		AddedAt:   time.Now().Unix(),
 	})
@@ -185,14 +191,18 @@ func (a *App) publishTGGroup(ctx context.Context, chatID int64, session tgGroupS
 		if ctx.Err() != nil {
 			return stats, nil
 		}
+
+		persistable := item.Kind == incomingMediaImage
 		pid := fmt.Sprintf("tggrp_%d_%d_p%d", chatID, session.StartedAt, idx)
-		if blocked, err := a.DB.IsBlocked(ctx, pid); err == nil && blocked {
-			stats.Skipped++
-			continue
-		}
-		if exists, _ := a.DB.Exists(ctx, pid); exists {
-			stats.Skipped++
-			continue
+		if persistable {
+			if blocked, err := a.DB.IsBlocked(ctx, pid); err == nil && blocked {
+				stats.Skipped++
+				continue
+			}
+			if exists, _ := a.DB.Exists(ctx, pid); exists {
+				stats.Skipped++
+				continue
+			}
 		}
 
 		data, _, err := a.TG.DownloadFile(ctx, item.FileID)
@@ -202,16 +212,27 @@ func (a *App) publishTGGroup(ctx context.Context, chatID int64, session tgGroupS
 			continue
 		}
 
-		originID, storageMsgID, err := a.TG.SendOriginDocument(ctx, data, "Original")
+		filename := strings.TrimSpace(item.Filename)
+		if filename == "" {
+			filename = buildTGGroupFilename(pid, item.Kind)
+		}
+
+		originID, storageMsgID, err := a.TG.SendOriginDocumentWithFilename(ctx, data, filename, "Original")
 		if err != nil {
 			stats.Failed++
 			log.Printf("TG group origin send failed pid=%s err=%v", pid, err)
 			continue
 		}
 
-		width, height := detectImageSize(data)
+		width, height := 0, 0
+		if persistable {
+			width, height = detectImageSize(data)
+		}
+
 		prepared = append(prepared, tgGroupPrepared{
 			ID:           pid,
+			Kind:         item.Kind,
+			Filename:     filename,
 			Data:         data,
 			OriginID:     originID,
 			StorageMsgID: storageMsgID,
@@ -225,6 +246,41 @@ func (a *App) publishTGGroup(ctx context.Context, chatID int64, session tgGroupS
 		return stats, nil
 	}
 
+	if hasOnlyImagePrepared(prepared) {
+		return a.publishTGGroupImageOnly(ctx, session, stats, prepared)
+	}
+	return a.publishTGGroupMixed(ctx, session, stats, prepared)
+}
+
+func hasOnlyImagePrepared(items []tgGroupPrepared) bool {
+	if len(items) == 0 {
+		return false
+	}
+	for _, item := range items {
+		if item.Kind != incomingMediaImage {
+			return false
+		}
+	}
+	return true
+}
+
+func buildTGGroupFilename(id string, kind incomingMediaKind) string {
+	suffix := ".bin"
+	switch kind {
+	case incomingMediaImage:
+		suffix = ".jpg"
+	case incomingMediaAnimation:
+		suffix = ".mp4"
+	case incomingMediaVideo:
+		suffix = ".mp4"
+	}
+	if strings.TrimSpace(id) == "" {
+		id = "tg_group"
+	}
+	return id + suffix
+}
+
+func (a *App) publishTGGroupImageOnly(ctx context.Context, session tgGroupSession, stats *tgGroupStats, prepared []tgGroupPrepared) (*tgGroupStats, error) {
 	groups := chunkTGPrepared(prepared, maxPixivAlbumGroup)
 	for groupIdx, group := range groups {
 		isLastGroup := groupIdx == len(groups)-1
@@ -298,7 +354,15 @@ func (a *App) publishTGGroup(ctx context.Context, chatID int64, session tgGroupS
 				Source:     "tg",
 				CreatedAt:  time.Now().Unix(),
 			})
-			discussionMsgID = a.sendDiscussionComment(ctx, anchorMeta, previewResults[0].PublishMsgID, group[0].StorageMsgID)
+			originLinks := make([]discussionOriginLink, 0, len(group))
+			for i, item := range group {
+				originLinks = append(originLinks, discussionOriginLink{
+					ImageID:      item.ID,
+					StorageMsgID: item.StorageMsgID,
+					Label:        fmt.Sprintf("\u539f\u56fe%d", i+1),
+				})
+			}
+			discussionMsgID = a.sendDiscussionCommentWithOrigins(ctx, anchorMeta, previewResults[0].PublishMsgID, originLinks)
 		}
 
 		for i, p := range group {
@@ -343,6 +407,136 @@ func (a *App) publishTGGroup(ctx context.Context, chatID int64, session tgGroupS
 		}
 
 		time.Sleep(1500 * time.Millisecond)
+	}
+
+	return stats, nil
+}
+
+func (a *App) publishTGGroupMixed(ctx context.Context, session tgGroupSession, stats *tgGroupStats, prepared []tgGroupPrepared) (*tgGroupStats, error) {
+	type preparedResult struct {
+		Prepared tgGroupPrepared
+		Preview  telegram.PreviewSendResult
+		Sent     bool
+	}
+
+	results := make([]preparedResult, len(prepared))
+	groupCaption := buildPreviewCaption(normalizePublishMeta(imagePublishMeta{
+		Title:      session.Title,
+		ArtistName: "Arts",
+		ArtistID:   "none",
+		SourceURL:  "none",
+		Source:     "tg",
+		CreatedAt:  time.Now().Unix(),
+	}))
+
+	for i, item := range prepared {
+		caption := ""
+		if i == len(prepared)-1 {
+			caption = groupCaption
+		}
+
+		var (
+			preview telegram.PreviewSendResult
+			err     error
+		)
+		switch item.Kind {
+		case incomingMediaImage:
+			preview, err = a.TG.SendPreviewPhoto(ctx, item.Data, caption)
+		case incomingMediaAnimation:
+			preview, err = a.TG.SendPreviewMotion(ctx, item.Data, item.Filename, caption, true)
+		default:
+			preview, err = a.TG.SendPreviewMotion(ctx, item.Data, item.Filename, caption, false)
+		}
+		if err != nil {
+			stats.Failed++
+			log.Printf("TG mixed group preview failed pid=%s kind=%s err=%v", item.ID, item.Kind, err)
+			continue
+		}
+
+		results[i] = preparedResult{Prepared: item, Preview: preview, Sent: true}
+		time.Sleep(1200 * time.Millisecond)
+	}
+
+	anchor := -1
+	for i := len(results) - 1; i >= 0; i-- {
+		if results[i].Sent {
+			anchor = i
+			break
+		}
+	}
+	if anchor < 0 {
+		return stats, nil
+	}
+
+	anchorMeta := normalizePublishMeta(imagePublishMeta{
+		Title:      session.Title,
+		ArtistName: "Arts",
+		ArtistID:   "none",
+		SourceURL:  "none",
+		Source:     "tg",
+		CreatedAt:  time.Now().Unix(),
+	})
+	originLinks := make([]discussionOriginLink, 0, len(results))
+	for _, item := range results {
+		if !item.Sent {
+			continue
+		}
+		originLinks = append(originLinks, discussionOriginLink{
+			ImageID:      item.Prepared.ID,
+			StorageMsgID: item.Prepared.StorageMsgID,
+			Label:        fmt.Sprintf("\u539f\u56fe%d", len(originLinks)+1),
+		})
+	}
+	discussionMsgID := a.sendDiscussionCommentWithOrigins(ctx, anchorMeta, results[anchor].Preview.PublishMsgID, originLinks)
+
+	for _, result := range results {
+		if !result.Sent {
+			continue
+		}
+
+		if result.Prepared.Kind != incomingMediaImage {
+			stats.Downloaded++
+			continue
+		}
+
+		meta := normalizePublishMeta(imagePublishMeta{
+			ID:         result.Prepared.ID,
+			Title:      session.Title,
+			ArtistName: "Arts",
+			ArtistID:   "none",
+			SourceURL:  "none",
+			Source:     "tg",
+			CreatedAt:  time.Now().Unix(),
+		})
+
+		width := result.Preview.Width
+		height := result.Preview.Height
+		if width <= 0 {
+			width = result.Prepared.Width
+		}
+		if height <= 0 {
+			height = result.Prepared.Height
+		}
+
+		persist := telegram.SendResult{
+			PreviewID:    result.Preview.PreviewID,
+			OriginID:     result.Prepared.OriginID,
+			PublishMsgID: result.Preview.PublishMsgID,
+			StorageMsgID: result.Prepared.StorageMsgID,
+			Width:        width,
+			Height:       height,
+		}
+
+		img, err := a.persistPublishedImage(ctx, meta, persist, discussionMsgID)
+		if err != nil {
+			stats.Failed++
+			log.Printf("TG mixed group persist failed pid=%s err=%v", result.Prepared.ID, err)
+			continue
+		}
+		stats.Downloaded++
+		if stats.FirstID == "" {
+			stats.FirstID = img.ID
+		}
 	}
 
 	return stats, nil

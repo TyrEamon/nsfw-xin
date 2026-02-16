@@ -16,6 +16,7 @@ const (
 	previewCaptionRuneLimit      = 950
 	expandableQuoteRuneThreshold = 180
 	expandableQuoteLineThreshold = 4
+	maxDiscussionOriginButtons   = 10
 )
 
 type imagePublishMeta struct {
@@ -45,7 +46,18 @@ func (a *App) publishImage(ctx context.Context, data []byte, meta imagePublishMe
 	return a.persistPublishedImage(ctx, meta, result, discussionMsgID)
 }
 
+type discussionOriginLink struct {
+	ImageID      string
+	StorageMsgID int
+	Label        string
+}
+
 func (a *App) sendDiscussionComment(ctx context.Context, meta imagePublishMeta, publishMsgID, storageMsgID int) int {
+	origins := []discussionOriginLink{{ImageID: meta.ID, StorageMsgID: storageMsgID, Label: "\u539f\u56fe"}}
+	return a.sendDiscussionCommentWithOrigins(ctx, meta, publishMsgID, origins)
+}
+
+func (a *App) sendDiscussionCommentWithOrigins(ctx context.Context, meta imagePublishMeta, publishMsgID int, origins []discussionOriginLink) int {
 	if a.Cfg.DiscussionGroupID == 0 {
 		return 0
 	}
@@ -53,15 +65,47 @@ func (a *App) sendDiscussionComment(ctx context.Context, meta imagePublishMeta, 
 	if comment == "" {
 		return 0
 	}
-	buttons := telegram.DiscussionButtons{
-		DetailsURL: channelMessageLink(a.Cfg.PublishChannelID, publishMsgID),
-		OriginURL:  a.buildOriginButtonURL(meta.ID, storageMsgID),
+
+	buttons := telegram.DiscussionButtons{DetailsURL: channelMessageLink(a.Cfg.PublishChannelID, publishMsgID)}
+	originButtons := a.buildDiscussionOriginButtons(origins)
+	if len(originButtons) == 1 {
+		buttons.OriginURL = originButtons[0].URL
+	} else if len(originButtons) > 1 {
+		buttons.OriginButtons = originButtons
 	}
+
 	msgID, err := a.queueOrSendDiscussionComment(ctx, publishMsgID, comment, buttons)
 	if err != nil {
 		log.Printf("discussion comment warning id=%s publish_msg_id=%d err=%v", meta.ID, publishMsgID, err)
 	}
 	return msgID
+}
+
+func (a *App) buildDiscussionOriginButtons(origins []discussionOriginLink) []telegram.DiscussionLinkButton {
+	if len(origins) == 0 {
+		return nil
+	}
+
+	buttons := make([]telegram.DiscussionLinkButton, 0, len(origins))
+	for _, origin := range origins {
+		if len(buttons) >= maxDiscussionOriginButtons {
+			break
+		}
+		url := a.buildOriginButtonURL(origin.ImageID, origin.StorageMsgID)
+		if strings.TrimSpace(url) == "" {
+			continue
+		}
+		text := strings.TrimSpace(origin.Label)
+		if text == "" {
+			if len(origins) == 1 {
+				text = "\u539f\u56fe"
+			} else {
+				text = fmt.Sprintf("\u539f\u56fe%d", len(buttons)+1)
+			}
+		}
+		buttons = append(buttons, telegram.DiscussionLinkButton{Text: text, URL: url})
+	}
+	return buttons
 }
 
 func (a *App) persistPublishedImage(ctx context.Context, meta imagePublishMeta, result telegram.SendResult, discussionMsgID int) (database.Image, error) {
