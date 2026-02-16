@@ -143,8 +143,6 @@ func (c *Client) EnsureSchema(ctx context.Context) error {
 		"CREATE TABLE IF NOT EXISTS crawler_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS image_backups (image_id TEXT PRIMARY KEY, preview_path TEXT, origin_path TEXT, status TEXT NOT NULL DEFAULT 'pending', retry_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
 		"CREATE INDEX IF NOT EXISTS idx_image_backups_status_updated ON image_backups(status, updated_at)",
-		"CREATE TABLE IF NOT EXISTS origin_bundle_items (bundle_id TEXT NOT NULL, item_order INTEGER NOT NULL, file_id TEXT NOT NULL, caption TEXT, created_at INTEGER NOT NULL, PRIMARY KEY(bundle_id, item_order))",
-		"CREATE INDEX IF NOT EXISTS idx_origin_bundle_items_bundle ON origin_bundle_items(bundle_id)",
 	}
 
 	for _, stmt := range stmts {
@@ -264,23 +262,6 @@ func (c *Client) GetImage(ctx context.Context, id string) (map[string]interface{
 		return nil, nil
 	}
 	return results[0], nil
-}
-
-func (c *Client) GetImageOrigin(ctx context.Context, id string) (originID, title string, ok bool, err error) {
-	sql := "SELECT origin_id, title FROM images WHERE id = ? AND status = 'active' LIMIT 1"
-	results, err := c.exec(ctx, sql, id)
-	if err != nil {
-		return "", "", false, err
-	}
-	if len(results) == 0 {
-		return "", "", false, nil
-	}
-	originID = strings.TrimSpace(rowString(results[0], "origin_id"))
-	title = strings.TrimSpace(rowString(results[0], "title"))
-	if originID == "" {
-		return "", title, false, nil
-	}
-	return originID, title, true, nil
 }
 
 func (c *Client) RandomImage(ctx context.Context, orientation string) (map[string]interface{}, error) {

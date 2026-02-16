@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -36,9 +35,6 @@ type Client struct {
 	PublishChannelID  int64
 	StorageChannelID  int64
 	DiscussionGroupID int64
-
-	previewMu         sync.RWMutex
-	previewHasSpoiler bool
 }
 
 type SendOptions struct {
@@ -56,15 +52,9 @@ type SendResult struct {
 	Height          int
 }
 
-type DiscussionLinkButton struct {
-	Text string
-	URL  string
-}
-
 type DiscussionButtons struct {
-	DetailsURL    string
-	OriginURL     string
-	OriginButtons []DiscussionLinkButton
+	DetailsURL string
+	OriginURL  string
 }
 
 type PreviewMedia struct {
@@ -93,19 +83,6 @@ func New(token string, publishChannelID, storageChannelID, discussionGroupID int
 		StorageChannelID:  storageChannelID,
 		DiscussionGroupID: discussionGroupID,
 	}, nil
-}
-
-func (c *Client) SetPreviewHasSpoiler(v bool) {
-	c.previewMu.Lock()
-	c.previewHasSpoiler = v
-	c.previewMu.Unlock()
-}
-
-func (c *Client) GetPreviewHasSpoiler() bool {
-	c.previewMu.RLock()
-	v := c.previewHasSpoiler
-	c.previewMu.RUnlock()
-	return v
 }
 
 func (c *Client) DownloadFile(ctx context.Context, fileID string) ([]byte, string, error) {
@@ -205,11 +182,10 @@ func (c *Client) SendPreviewPhoto(ctx context.Context, data []byte, caption stri
 	}
 
 	publishMsg, err := c.Bot.SendPhoto(ctx, &bot.SendPhotoParams{
-		ChatID:     c.PublishChannelID,
-		Photo:      &models.InputFileUpload{Filename: "preview.jpg", Data: bytes.NewReader(previewData)},
-		Caption:    caption,
-		ParseMode:  models.ParseModeHTML,
-		HasSpoiler: c.GetPreviewHasSpoiler(),
+		ChatID:    c.PublishChannelID,
+		Photo:     &models.InputFileUpload{Filename: "preview.jpg", Data: bytes.NewReader(previewData)},
+		Caption:   caption,
+		ParseMode: models.ParseModeHTML,
 	})
 	if err != nil {
 		return PreviewSendResult{}, err
@@ -226,67 +202,12 @@ func (c *Client) SendPreviewPhoto(ctx context.Context, data []byte, caption stri
 	return res, nil
 }
 
-func (c *Client) SendPreviewMotion(ctx context.Context, data []byte, filename, caption string, asAnimation bool) (PreviewSendResult, error) {
-	filename = strings.TrimSpace(filename)
-	if filename == "" {
-		filename = "preview.mp4"
-	}
-
-	res := PreviewSendResult{}
-	if asAnimation {
-		publishMsg, err := c.Bot.SendAnimation(ctx, &bot.SendAnimationParams{
-			ChatID:     c.PublishChannelID,
-			Animation:  &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
-			Caption:    caption,
-			ParseMode:  models.ParseModeHTML,
-			HasSpoiler: c.GetPreviewHasSpoiler(),
-		})
-		if err != nil {
-			return PreviewSendResult{}, err
-		}
-		res.PublishMsgID = publishMsg.ID
-		if publishMsg.Animation != nil {
-			res.PreviewID = publishMsg.Animation.FileID
-			res.Width = publishMsg.Animation.Width
-			res.Height = publishMsg.Animation.Height
-		}
-		return res, nil
-	}
-
-	publishMsg, err := c.Bot.SendVideo(ctx, &bot.SendVideoParams{
-		ChatID:            c.PublishChannelID,
-		Video:             &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
-		Caption:           caption,
-		ParseMode:         models.ParseModeHTML,
-		HasSpoiler:        c.GetPreviewHasSpoiler(),
-		SupportsStreaming: true,
-	})
-	if err != nil {
-		return PreviewSendResult{}, err
-	}
-	res.PublishMsgID = publishMsg.ID
-	if publishMsg.Video != nil {
-		res.PreviewID = publishMsg.Video.FileID
-		res.Width = publishMsg.Video.Width
-		res.Height = publishMsg.Video.Height
-	}
-	return res, nil
-}
-
 func (c *Client) SendOriginDocument(ctx context.Context, data []byte, caption string) (string, int, error) {
 	_, format := detectImageFormat(data)
 	originName := "origin." + extFromFormat(format)
-	return c.SendOriginDocumentWithFilename(ctx, data, originName, caption)
-}
-
-func (c *Client) SendOriginDocumentWithFilename(ctx context.Context, data []byte, filename, caption string) (string, int, error) {
-	filename = strings.TrimSpace(filename)
-	if filename == "" {
-		filename = "origin.bin"
-	}
 	storageMsg, err := c.Bot.SendDocument(ctx, &bot.SendDocumentParams{
 		ChatID:   c.StorageChannelID,
-		Document: &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)},
+		Document: &models.InputFileUpload{Filename: originName, Data: bytes.NewReader(data)},
 		Caption:  caption,
 	})
 	if err != nil {
@@ -336,7 +257,6 @@ func (c *Client) SendPreviewMediaGroup(ctx context.Context, items []PreviewMedia
 			input.Caption = caption
 			input.ParseMode = models.ParseModeHTML
 		}
-		input.HasSpoiler = c.GetPreviewHasSpoiler()
 		media = append(media, input)
 
 		results[i].Width = width
@@ -362,23 +282,6 @@ func (c *Client) SendPreviewMediaGroup(ctx context.Context, items []PreviewMedia
 	}
 
 	return results, nil
-}
-
-func (c *Client) SendDocumentByFileID(ctx context.Context, chatID int64, fileID, caption string) (int, error) {
-	fileID = strings.TrimSpace(fileID)
-	if fileID == "" {
-		return 0, fmt.Errorf("empty file id")
-	}
-
-	msg, err := c.Bot.SendDocument(ctx, &bot.SendDocumentParams{
-		ChatID:   chatID,
-		Document: &models.InputFileString{Data: fileID},
-		Caption:  strings.TrimSpace(caption),
-	})
-	if err != nil {
-		return 0, err
-	}
-	return msg.ID, nil
 }
 
 func (c *Client) SendDiscussionReply(ctx context.Context, discussionMessageID int, text string, buttons DiscussionButtons) (int, error) {
@@ -434,50 +337,17 @@ func (c *Client) SendDiscussionComment(ctx context.Context, publishMessageID int
 }
 
 func buildDiscussionReplyMarkup(buttons DiscussionButtons) *models.InlineKeyboardMarkup {
-	rows := make([][]models.InlineKeyboardButton, 0, 4)
-	header := make([]models.InlineKeyboardButton, 0, 2)
-
-	if strings.TrimSpace(buttons.DetailsURL) != "" {
-		header = append(header, models.InlineKeyboardButton{Text: "\u8be6\u60c5", URL: strings.TrimSpace(buttons.DetailsURL)})
+	rows := make([][]models.InlineKeyboardButton, 0, 1)
+	row := make([]models.InlineKeyboardButton, 0, 2)
+	if buttons.DetailsURL != "" {
+		row = append(row, models.InlineKeyboardButton{Text: "\u8be6\u60c5", URL: buttons.DetailsURL})
 	}
-
-	origins := make([]DiscussionLinkButton, 0, 1+len(buttons.OriginButtons))
-	if strings.TrimSpace(buttons.OriginURL) != "" {
-		origins = append(origins, DiscussionLinkButton{Text: "\u539f\u56fe", URL: strings.TrimSpace(buttons.OriginURL)})
+	if buttons.OriginURL != "" {
+		row = append(row, models.InlineKeyboardButton{Text: "\u539f\u56fe", URL: buttons.OriginURL})
 	}
-	for _, btn := range buttons.OriginButtons {
-		url := strings.TrimSpace(btn.URL)
-		if url == "" {
-			continue
-		}
-		text := strings.TrimSpace(btn.Text)
-		if text == "" {
-			text = fmt.Sprintf("\u539f\u56fe%d", len(origins)+1)
-		}
-		origins = append(origins, DiscussionLinkButton{Text: text, URL: url})
-	}
-
-	if len(origins) > 0 && len(header) < 2 {
-		header = append(header, models.InlineKeyboardButton{Text: origins[0].Text, URL: origins[0].URL})
-		origins = origins[1:]
-	}
-	if len(header) > 0 {
-		rows = append(rows, header)
-	}
-
-	const originPerRow = 3
-	for i := 0; i < len(origins); i += originPerRow {
-		end := i + originPerRow
-		if end > len(origins) {
-			end = len(origins)
-		}
-		row := make([]models.InlineKeyboardButton, 0, end-i)
-		for _, btn := range origins[i:end] {
-			row = append(row, models.InlineKeyboardButton{Text: btn.Text, URL: btn.URL})
-		}
+	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-
 	if len(rows) == 0 {
 		return nil
 	}

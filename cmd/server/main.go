@@ -44,11 +44,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	tg.SetPreviewHasSpoiler(cfg.PreviewHasSpoiler)
 
 	pv := pixiv.New(cfg.PixivPHPSESSID, cfg.PixivUserID, cfg.PixivRest)
 	application := app.New(cfg, db, tg, pv)
-	application.InitRuntimeFlags(context.Background())
 	backupSvc := backup.New(backup.Config{
 		Enabled:            cfg.BackupEnabled,
 		WebDAVURL:          cfg.BackupWebDAVURL,
@@ -84,7 +82,7 @@ func main() {
 			if update.Message != nil && update.Message.Chat.ID != cfg.PublishChannelID && update.Message.Chat.ID != cfg.StorageChannelID && update.Message.Chat.ID != cfg.DiscussionGroupID {
 				_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 					ChatID: update.Message.Chat.ID,
-					Text:   fmt.Sprintf("\u8fd9\u6b21\u662f\u7f51\u7edc\u95f9\u813e\u6c14\u4e86\u55b5~\n\u9519\u8bef\uff1a%v", err),
+					Text:   fmt.Sprintf("哼，这次才不是我失手呢喵~\n是网络在捣乱啦。\n错误：%v", err),
 				})
 			}
 			return
@@ -92,7 +90,9 @@ func main() {
 		if result != nil && update.Message != nil && update.Message.Chat.ID != cfg.ChannelID {
 			replyText := strings.TrimSpace(result.Summary)
 			if replyText == "" {
-				replyText = fmt.Sprintf("\u54fc\uff0c\u7ed9\u4f60\u5904\u7406\u597d\u4e86\u55b5~\n\u6807\u9898\uff1a%s\nID\uff1a%s", result.Title, result.ID)
+				replyText = fmt.Sprintf("哼，才不是特地帮你处理的喵~\n标题：%s\nID：%s", result.Title, result.ID)
+			} else {
+				replyText = fmt.Sprintf("哼，结果给你啦喵~\n%s", replyText)
 			}
 			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID: update.Message.Chat.ID,

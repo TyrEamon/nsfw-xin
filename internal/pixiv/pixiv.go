@@ -87,13 +87,12 @@ func (c *Client) FetchBookmarkIDs(offset, limit int, tag string) ([]string, int,
 
 type detailResp struct {
 	Body struct {
-		IllustID    string `json:"illustId"`
-		Title       string `json:"illustTitle"`
-		Description string `json:"description"`
-		UserID      string `json:"userId"`
-		UserName    string `json:"userName"`
-		IllustType  int    `json:"illustType"`
-		Tags        struct {
+		IllustID   string `json:"illustId"`
+		Title      string `json:"illustTitle"`
+		UserID     string `json:"userId"`
+		UserName   string `json:"userName"`
+		IllustType int    `json:"illustType"`
+		Tags       struct {
 			Tags []struct {
 				Tag string `json:"tag"`
 			} `json:"tags"`

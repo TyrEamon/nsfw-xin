@@ -130,16 +130,7 @@ func (a *App) ingestPixivAlbumCandidates(ctx context.Context, artworkID string, 
 		if isLastGroup {
 			anchorMeta := baseMeta
 			anchorMeta.ID = prepared[0].Candidate.PID
-			originLinks := make([]discussionOriginLink, 0, len(prepared))
-			for i, page := range prepared {
-				originLinks = append(originLinks, discussionOriginLink{
-					ImageID:      page.Candidate.PID,
-					OriginID:     page.OriginID,
-					StorageMsgID: page.StorageMsgID,
-					Label:        fmt.Sprintf("\u539f\u56fe%d", i+1),
-				})
-			}
-			discussionMsgID = a.sendDiscussionCommentWithOrigins(ctx, normalizePublishMeta(anchorMeta), previewResults[0].PublishMsgID, originLinks)
+			discussionMsgID = a.sendDiscussionComment(ctx, normalizePublishMeta(anchorMeta), previewResults[0].PublishMsgID, prepared[0].StorageMsgID)
 		}
 
 		for i, p := range prepared {

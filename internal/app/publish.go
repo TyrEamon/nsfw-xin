@@ -12,13 +12,6 @@ import (
 	"pixiv-tg-gallery/internal/telegram"
 )
 
-const (
-	previewCaptionRuneLimit      = 950
-	expandableQuoteRuneThreshold = 180
-	expandableQuoteLineThreshold = 4
-	maxDiscussionOriginButtons   = 10
-)
-
 type imagePublishMeta struct {
 	ID         string
 	Title      string
@@ -42,23 +35,11 @@ func (a *App) publishImage(ctx context.Context, data []byte, meta imagePublishMe
 		return database.Image{}, err
 	}
 
-	discussionMsgID := a.sendDiscussionComment(ctx, meta, result.PublishMsgID, result.OriginID, result.StorageMsgID)
+	discussionMsgID := a.sendDiscussionComment(ctx, meta, result.PublishMsgID, result.StorageMsgID)
 	return a.persistPublishedImage(ctx, meta, result, discussionMsgID)
 }
 
-type discussionOriginLink struct {
-	ImageID      string
-	OriginID     string
-	StorageMsgID int
-	Label        string
-}
-
-func (a *App) sendDiscussionComment(ctx context.Context, meta imagePublishMeta, publishMsgID int, originID string, storageMsgID int) int {
-	origins := []discussionOriginLink{{ImageID: meta.ID, OriginID: originID, StorageMsgID: storageMsgID, Label: "\u539f\u56fe"}}
-	return a.sendDiscussionCommentWithOrigins(ctx, meta, publishMsgID, origins)
-}
-
-func (a *App) sendDiscussionCommentWithOrigins(ctx context.Context, meta imagePublishMeta, publishMsgID int, origins []discussionOriginLink) int {
+func (a *App) sendDiscussionComment(ctx context.Context, meta imagePublishMeta, publishMsgID, storageMsgID int) int {
 	if a.Cfg.DiscussionGroupID == 0 {
 		return 0
 	}
@@ -66,55 +47,15 @@ func (a *App) sendDiscussionCommentWithOrigins(ctx context.Context, meta imagePu
 	if comment == "" {
 		return 0
 	}
-
-	buttons := telegram.DiscussionButtons{DetailsURL: channelMessageLink(a.Cfg.PublishChannelID, publishMsgID)}
-	originButtons := a.buildDiscussionOriginButtons(origins)
-	if len(origins) > 1 {
-		if bundleURL, err := a.buildOriginBundleURL(ctx, origins); err != nil {
-			log.Printf("discussion origin bundle warning id=%s publish_msg_id=%d err=%v", meta.ID, publishMsgID, err)
-		} else if strings.TrimSpace(bundleURL) != "" {
-			buttons.OriginURL = bundleURL
-		} else if len(originButtons) == 1 {
-			buttons.OriginURL = originButtons[0].URL
-		} else if len(originButtons) > 1 {
-			buttons.OriginButtons = originButtons
-		}
-	} else if len(originButtons) == 1 {
-		buttons.OriginURL = originButtons[0].URL
+	buttons := telegram.DiscussionButtons{
+		DetailsURL: channelMessageLink(a.Cfg.PublishChannelID, publishMsgID),
+		OriginURL:  channelMessageLink(a.Cfg.StorageChannelID, storageMsgID),
 	}
-
 	msgID, err := a.queueOrSendDiscussionComment(ctx, publishMsgID, comment, buttons)
 	if err != nil {
 		log.Printf("discussion comment warning id=%s publish_msg_id=%d err=%v", meta.ID, publishMsgID, err)
 	}
 	return msgID
-}
-
-func (a *App) buildDiscussionOriginButtons(origins []discussionOriginLink) []telegram.DiscussionLinkButton {
-	if len(origins) == 0 {
-		return nil
-	}
-
-	buttons := make([]telegram.DiscussionLinkButton, 0, len(origins))
-	for _, origin := range origins {
-		if len(buttons) >= maxDiscussionOriginButtons {
-			break
-		}
-		url := a.buildOriginButtonURL(origin.ImageID, origin.OriginID, origin.StorageMsgID)
-		if strings.TrimSpace(url) == "" {
-			continue
-		}
-		text := strings.TrimSpace(origin.Label)
-		if text == "" {
-			if len(origins) == 1 {
-				text = "\u539f\u56fe"
-			} else {
-				text = fmt.Sprintf("\u539f\u56fe%d", len(buttons)+1)
-			}
-		}
-		buttons = append(buttons, telegram.DiscussionLinkButton{Text: text, URL: url})
-	}
-	return buttons
 }
 
 func (a *App) persistPublishedImage(ctx context.Context, meta imagePublishMeta, result telegram.SendResult, discussionMsgID int) (database.Image, error) {
@@ -185,49 +126,18 @@ func buildPreviewCaption(meta imagePublishMeta) string {
 
 	parts := []string{header}
 	if meta.SourceText != "" {
-		parts = append(parts, buildPreviewQuote(meta.SourceText))
+		parts = append(parts, "<blockquote>"+html.EscapeString(meta.SourceText)+"</blockquote>")
 	}
 	tagLine := buildTagLine(meta.Tags)
 	if tagLine != "" {
-		parts = append(parts, buildPreviewQuote(tagLine))
+		parts = append(parts, "<blockquote>"+html.EscapeString(tagLine)+"</blockquote>")
 	}
 
 	caption := strings.Join(parts, "\n")
-	if utf8.RuneCountInString(caption) > previewCaptionRuneLimit {
-		caption = clipRunes(caption, previewCaptionRuneLimit)
+	if utf8.RuneCountInString(caption) > 950 {
+		caption = clipRunes(caption, 950)
 	}
 	return caption
-}
-
-func buildPreviewQuote(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-
-	escaped := html.EscapeString(text)
-	if shouldUseExpandableQuote(text) {
-		return "<blockquote expandable>" + escaped + "</blockquote>"
-	}
-	return "<blockquote>" + escaped + "</blockquote>"
-}
-
-func shouldUseExpandableQuote(text string) bool {
-	if utf8.RuneCountInString(text) >= expandableQuoteRuneThreshold {
-		return true
-	}
-
-	lineCount := 1
-	for _, r := range text {
-		if r != '\n' {
-			continue
-		}
-		lineCount++
-		if lineCount >= expandableQuoteLineThreshold {
-			return true
-		}
-	}
-	return false
 }
 
 func buildDiscussionComment(meta imagePublishMeta) string {
