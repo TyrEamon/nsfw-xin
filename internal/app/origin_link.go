@@ -36,7 +36,10 @@ func (a *App) buildOriginDeepLink(imageID string) string {
 		return ""
 	}
 
-	exp := time.Now().Unix() + int64(a.Cfg.OriginLinkTTLSeconds)
+	exp := int64(0)
+	if a.Cfg.OriginLinkTTLSeconds > 0 {
+		exp = time.Now().Unix() + int64(a.Cfg.OriginLinkTTLSeconds)
+	}
 	token := a.buildOriginToken(imageID, exp)
 	return fmt.Sprintf("https://t.me/%s?start=%s", botUsername, token)
 }
@@ -120,7 +123,7 @@ func (a *App) verifyOriginToken(token string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid token exp")
 	}
-	if time.Now().Unix() > exp {
+	if a.Cfg.OriginLinkTTLSeconds > 0 && time.Now().Unix() > exp {
 		return "", fmt.Errorf("token expired")
 	}
 

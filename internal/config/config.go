@@ -139,7 +139,7 @@ func Load() *Config {
 		cfg.ChannelID = cfg.PublishChannelID
 	}
 
-	if cfg.OriginLinkTTLSeconds <= 0 {
+	if cfg.OriginLinkTTLSeconds < 0 {
 		cfg.OriginLinkTTLSeconds = 604800
 	}
 
