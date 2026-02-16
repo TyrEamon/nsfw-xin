@@ -143,6 +143,8 @@ func (c *Client) EnsureSchema(ctx context.Context) error {
 		"CREATE TABLE IF NOT EXISTS crawler_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS image_backups (image_id TEXT PRIMARY KEY, preview_path TEXT, origin_path TEXT, status TEXT NOT NULL DEFAULT 'pending', retry_count INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
 		"CREATE INDEX IF NOT EXISTS idx_image_backups_status_updated ON image_backups(status, updated_at)",
+		"CREATE TABLE IF NOT EXISTS origin_bundle_items (bundle_id TEXT NOT NULL, item_order INTEGER NOT NULL, file_id TEXT NOT NULL, caption TEXT, created_at INTEGER NOT NULL, PRIMARY KEY(bundle_id, item_order))",
+		"CREATE INDEX IF NOT EXISTS idx_origin_bundle_items_bundle ON origin_bundle_items(bundle_id)",
 	}
 
 	for _, stmt := range stmts {

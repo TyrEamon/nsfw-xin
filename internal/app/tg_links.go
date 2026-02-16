@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
 	neturl "net/url"
 	"path"
+	"pixiv-tg-gallery/internal/telegram"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -21,12 +24,14 @@ const (
 )
 
 var (
-	urlPattern       = regexp.MustCompile(`https?://[^\s]+`)
-	pixivIDPattern   = regexp.MustCompile(`^\d+$`)
-	yandeIDPattern   = regexp.MustCompile(`^\d+$`)
-	twitterIDPattern = regexp.MustCompile(`^\d+$`)
-	hashtagPattern   = regexp.MustCompile(`#([A-Za-z0-9_]+)`)
-	punctuationTrim  = ".,;:!?)]}>'\"\uFF0C\u3002\uFF01\uFF1F\u3001\uFF09\u3011\u300B"
+	urlPattern        = regexp.MustCompile(`https?://[^\s]+`)
+	pixivIDPattern    = regexp.MustCompile(`^\d+$`)
+	yandeIDPattern    = regexp.MustCompile(`^\d+$`)
+	twitterIDPattern  = regexp.MustCompile(`^\d+$`)
+	hashtagPattern    = regexp.MustCompile(`#([\p{L}\p{N}_][\p{L}\p{N}_\p{M}]*)`)
+	pixivBRTagPattern = regexp.MustCompile(`(?i)<br\s*/?>`)
+	htmlTagPattern    = regexp.MustCompile(`(?s)<[^>]+>`)
+	punctuationTrim   = ".,;:!?)]}>'\"\uFF0C\u3002\uFF01\uFF1F\u3001\uFF09\u3011\u300B"
 )
 
 type linkType string
@@ -237,57 +242,245 @@ func (a *App) ingestPixivFromLink(ctx context.Context, item supportedLink) (*TGI
 }
 
 func (a *App) ingestYandeFromLink(ctx context.Context, item supportedLink) (*TGIngestResult, error) {
-	imgID := fmt.Sprintf("yande_%s", item.ID)
-	if blocked, err := a.DB.IsBlocked(ctx, imgID); err == nil && blocked {
-		return &TGIngestResult{
-			ID:        imgID,
-			Title:     "Yandex",
-			SourceURL: item.URL,
-			Summary:   fmt.Sprintf("Yande %s skipped: blocked", item.ID),
-		}, nil
-	}
-	if exists, _ := a.DB.Exists(ctx, imgID); exists {
-		return &TGIngestResult{
-			ID:        imgID,
-			Title:     "Yandex",
-			SourceURL: item.URL,
-			Summary:   fmt.Sprintf("Yande %s skipped: already exists", item.ID),
-		}, nil
-	}
-
-	post, err := fetchYandePost(ctx, item.ID)
+	posts, err := fetchYandeFamilyPosts(ctx, item.ID)
 	if err != nil {
 		return nil, err
 	}
-	imgURL := post.bestImageURL()
-	if imgURL == "" {
-		return nil, fmt.Errorf("no downloadable image URL")
+	if len(posts) == 0 {
+		return nil, fmt.Errorf("yande post not found")
 	}
-	data, err := downloadWithHeaders(ctx, imgURL, "https://yande.re/")
+
+	stats, err := a.ingestYandePosts(ctx, item, posts)
 	if err != nil {
 		return nil, err
 	}
 
-	img, err := a.publishImage(ctx, data, imagePublishMeta{
-		ID:         imgID,
-		Title:      "Yandex",
-		ArtistName: "Arts",
-		ArtistID:   "none",
-		SourceURL:  item.URL,
-		Source:     "yande",
-		Tags:       strings.TrimSpace(post.Tags),
-		CreatedAt:  time.Now().Unix(),
-	})
-	if err != nil {
-		return nil, err
-	}
-
+	msg := fmt.Sprintf("Yande %s done: +%d, skipped %d, failed %d", item.ID, stats.Downloaded, stats.Skipped, stats.Failed)
 	return &TGIngestResult{
-		ID:        img.ID,
-		Title:     img.Title,
-		SourceURL: img.SourceURL,
-		Summary:   fmt.Sprintf("Yande %s ingested (+1)", item.ID),
+		ID:        stats.FirstID,
+		Title:     stats.Title,
+		SourceURL: item.URL,
+		Summary:   msg,
 	}, nil
+}
+
+type yandePreparedPost struct {
+	Post         yandePost
+	PID          string
+	Data         []byte
+	OriginID     string
+	StorageMsgID int
+	Width        int
+	Height       int
+}
+
+func (a *App) ingestYandePosts(ctx context.Context, item supportedLink, posts []yandePost) (*ingestStats, error) {
+	stats := &ingestStats{Title: "Yandex"}
+	prepared := make([]yandePreparedPost, 0, len(posts))
+
+	for _, post := range posts {
+		pid := fmt.Sprintf("yande_%d", post.ID)
+		if blocked, err := a.DB.IsBlocked(ctx, pid); err == nil && blocked {
+			stats.Skipped++
+			continue
+		}
+		if exists, _ := a.DB.Exists(ctx, pid); exists {
+			stats.Skipped++
+			continue
+		}
+
+		imgURL := post.bestImageURL()
+		if imgURL == "" {
+			stats.Failed++
+			log.Printf("Yande image URL missing pid=%s", pid)
+			continue
+		}
+
+		data, err := downloadWithHeaders(ctx, imgURL, "https://yande.re/")
+		if err != nil {
+			stats.Failed++
+			log.Printf("Yande download failed pid=%s err=%v", pid, err)
+			continue
+		}
+
+		originID, storageMsgID, err := a.TG.SendOriginDocumentWithFilename(ctx, data, buildYandeOriginFilename(post), "Original")
+		if err != nil {
+			stats.Failed++
+			log.Printf("Yande origin send failed pid=%s err=%v", pid, err)
+			continue
+		}
+
+		width, height := detectImageSize(data)
+		prepared = append(prepared, yandePreparedPost{
+			Post:         post,
+			PID:          pid,
+			Data:         data,
+			OriginID:     originID,
+			StorageMsgID: storageMsgID,
+			Width:        width,
+			Height:       height,
+		})
+		time.Sleep(1200 * time.Millisecond)
+	}
+
+	if len(prepared) == 0 {
+		return stats, nil
+	}
+
+	groups := chunkYandePrepared(prepared, maxPixivAlbumGroup)
+	for groupIdx, group := range groups {
+		isLastGroup := groupIdx == len(groups)-1
+		baseMeta := normalizePublishMeta(imagePublishMeta{
+			Title:      "Yandex",
+			ArtistName: "Arts",
+			ArtistID:   "none",
+			SourceURL:  item.URL,
+			Source:     "yande",
+			Tags:       strings.TrimSpace(group[0].Post.Tags),
+			CreatedAt:  time.Now().Unix(),
+		})
+
+		groupCaption := ""
+		if isLastGroup {
+			groupCaption = buildPreviewCaption(baseMeta)
+		}
+
+		previewItems := make([]telegram.PreviewMedia, 0, len(group))
+		for _, p := range group {
+			previewItems = append(previewItems, telegram.PreviewMedia{
+				Data:     p.Data,
+				Filename: fmt.Sprintf("%s_preview.jpg", p.PID),
+				Width:    p.Width,
+				Height:   p.Height,
+			})
+		}
+
+		previewResults, err := a.TG.SendPreviewMediaGroup(ctx, previewItems, groupCaption)
+		if err != nil {
+			log.Printf("Yande media group failed group=%d err=%v fallback=single_preview", groupIdx+1, err)
+			fallbackGroup := make([]yandePreparedPost, 0, len(group))
+			fallbackPreview := make([]telegram.PreviewSendResult, 0, len(group))
+			for i, p := range group {
+				caption := ""
+				if i == 0 {
+					caption = groupCaption
+				}
+				res, sendErr := a.TG.SendPreviewPhoto(ctx, p.Data, caption)
+				if sendErr != nil {
+					stats.Failed++
+					log.Printf("Yande fallback preview failed pid=%s err=%v", p.PID, sendErr)
+					continue
+				}
+				fallbackGroup = append(fallbackGroup, p)
+				fallbackPreview = append(fallbackPreview, res)
+			}
+			group = fallbackGroup
+			previewResults = fallbackPreview
+		}
+
+		if len(group) == 0 || len(previewResults) == 0 {
+			continue
+		}
+		if len(group) != len(previewResults) {
+			limit := len(group)
+			if len(previewResults) < limit {
+				limit = len(previewResults)
+			}
+			group = group[:limit]
+			previewResults = previewResults[:limit]
+		}
+
+		discussionMsgID := 0
+		if isLastGroup {
+			anchorMeta := baseMeta
+			anchorMeta.ID = group[0].PID
+			originLinks := make([]discussionOriginLink, 0, len(group))
+			for i, page := range group {
+				originLinks = append(originLinks, discussionOriginLink{
+					ImageID:      page.PID,
+					OriginID:     page.OriginID,
+					StorageMsgID: page.StorageMsgID,
+					Label:        fmt.Sprintf("\u539f\u56fe%d", i+1),
+				})
+			}
+			discussionMsgID = a.sendDiscussionCommentWithOrigins(ctx, anchorMeta, previewResults[0].PublishMsgID, originLinks)
+		}
+
+		for i, p := range group {
+			meta := baseMeta
+			meta.ID = p.PID
+			meta.Tags = strings.TrimSpace(p.Post.Tags)
+			meta.CreatedAt = time.Now().Unix()
+
+			width := previewResults[i].Width
+			height := previewResults[i].Height
+			if width <= 0 {
+				width = p.Width
+			}
+			if height <= 0 {
+				height = p.Height
+			}
+
+			result := telegram.SendResult{
+				PreviewID:    previewResults[i].PreviewID,
+				OriginID:     p.OriginID,
+				PublishMsgID: previewResults[i].PublishMsgID,
+				StorageMsgID: p.StorageMsgID,
+				Width:        width,
+				Height:       height,
+			}
+
+			img, persistErr := a.persistPublishedImage(ctx, normalizePublishMeta(meta), result, discussionMsgID)
+			if persistErr != nil {
+				stats.Failed++
+				log.Printf("Yande persist failed pid=%s err=%v", p.PID, persistErr)
+				continue
+			}
+			stats.Downloaded++
+			if stats.FirstID == "" {
+				stats.FirstID = img.ID
+			}
+		}
+
+		time.Sleep(1500 * time.Millisecond)
+	}
+
+	return stats, nil
+}
+
+func chunkYandePrepared(items []yandePreparedPost, size int) [][]yandePreparedPost {
+	if len(items) == 0 {
+		return nil
+	}
+	if size <= 0 {
+		size = maxPixivAlbumGroup
+	}
+	out := make([][]yandePreparedPost, 0, (len(items)+size-1)/size)
+	for start := 0; start < len(items); start += size {
+		end := start + size
+		if end > len(items) {
+			end = len(items)
+		}
+		chunk := make([]yandePreparedPost, end-start)
+		copy(chunk, items[start:end])
+		out = append(out, chunk)
+	}
+	return out
+}
+
+func buildYandeOriginFilename(post yandePost) string {
+	ext := ".jpg"
+	raw := strings.TrimSpace(post.bestImageURL())
+	if raw != "" {
+		if u, err := neturl.Parse(raw); err == nil {
+			candidate := strings.ToLower(path.Ext(u.Path))
+			switch candidate {
+			case ".jpg", ".jpeg", ".png", ".webp", ".gif":
+				ext = candidate
+			}
+		}
+	}
+	return fmt.Sprintf("yande_%d%s", post.ID, ext)
 }
 
 func (a *App) ingestTwitterFromLink(ctx context.Context, item supportedLink) (*TGIngestResult, error) {
@@ -338,12 +531,23 @@ func (a *App) ingestTwitterTweet(ctx context.Context, tweetID, sourceURL string)
 	}
 
 	photos := tweet.photoURLs()
-	if len(photos) == 0 {
-		return nil, fmt.Errorf("tweet has no photos")
+	motions := tweet.motionMedia()
+	if len(photos) == 0 && len(motions) == 0 {
+		return nil, fmt.Errorf("tweet has no media")
 	}
-	log.Printf("Twitter tweet fetched id=%s photos=%d", tweetID, len(photos))
+	log.Printf("Twitter tweet fetched id=%s photos=%d motions=%d", tweetID, len(photos), len(motions))
 
 	tags := strings.Join(extractHashTags(tweet.Text), " ")
+	baseMeta := imagePublishMeta{
+		Title:      title,
+		ArtistName: artistName,
+		ArtistID:   artistID,
+		SourceURL:  sourceURL,
+		SourceText: tweet.Text,
+		Source:     "twitter",
+		Tags:       tags,
+		CreatedAt:  time.Now().Unix(),
+	}
 	stats := &ingestStats{Title: title}
 
 	for i, rawURL := range photos {
@@ -367,17 +571,11 @@ func (a *App) ingestTwitterTweet(ctx context.Context, tweetID, sourceURL string)
 			continue
 		}
 
-		img, err := a.publishImage(ctx, imgData, imagePublishMeta{
-			ID:         pid,
-			Title:      title,
-			ArtistName: artistName,
-			ArtistID:   artistID,
-			SourceURL:  sourceURL,
-			SourceText: tweet.Text,
-			Source:     "twitter",
-			Tags:       tags,
-			CreatedAt:  time.Now().Unix(),
-		})
+		meta := baseMeta
+		meta.ID = pid
+		meta.CreatedAt = time.Now().Unix()
+
+		img, err := a.publishImage(ctx, imgData, meta)
 		if err != nil {
 			stats.Failed++
 			log.Printf("Twitter publish failed pid=%s err=%v", pid, err)
@@ -387,6 +585,37 @@ func (a *App) ingestTwitterTweet(ctx context.Context, tweetID, sourceURL string)
 				stats.FirstID = pid
 			}
 			log.Printf("Twitter stored pid=%s size=%dx%d", pid, img.Width, img.Height)
+		}
+
+		time.Sleep(1500 * time.Millisecond)
+	}
+
+	for i, item := range motions {
+		pid := fmt.Sprintf("twitter_%s_v%d", tweetID, i)
+		mediaURL := strings.TrimSpace(item.URL)
+		if mediaURL == "" {
+			stats.Failed++
+			log.Printf("Twitter media skip pid=%s reason=empty_url", pid)
+			continue
+		}
+
+		mediaData, err := downloadWithHeaders(ctx, mediaURL, "https://x.com/")
+		if err != nil {
+			stats.Failed++
+			log.Printf("Twitter media download failed pid=%s err=%v", pid, err)
+			continue
+		}
+
+		filename := buildTwitterMediaFilename(tweetID, i, item)
+		meta := baseMeta
+		meta.ID = ""
+		meta.CreatedAt = time.Now().Unix()
+		if err := a.publishMotionNoDB(ctx, mediaData, filename, item.isAnimation(), meta); err != nil {
+			stats.Failed++
+			log.Printf("Twitter media publish failed pid=%s err=%v", pid, err)
+		} else {
+			stats.Downloaded++
+			log.Printf("Twitter media published pid=%s animation=%t", pid, item.isAnimation())
 		}
 
 		time.Sleep(1500 * time.Millisecond)
@@ -432,6 +661,7 @@ func (a *App) ingestPixivArtwork(ctx context.Context, id string, sourceURL strin
 		ArtistName: detail.Body.UserName,
 		ArtistID:   detail.Body.UserID,
 		SourceURL:  sourceURL,
+		SourceText: pixivDescriptionToText(detail.Body.Description),
 		Source:     "pixiv",
 		Tags:       strings.Join(tags, " "),
 	}
@@ -499,12 +729,14 @@ func (a *App) ingestPixivArtwork(ctx context.Context, id string, sourceURL strin
 }
 
 type yandePost struct {
-	ID        int    `json:"id"`
-	FileURL   string `json:"file_url"`
-	JPEGURL   string `json:"jpeg_url"`
-	PNGURL    string `json:"png_url"`
-	SampleURL string `json:"sample_url"`
-	Tags      string `json:"tags"`
+	ID          int    `json:"id"`
+	ParentID    *int   `json:"parent_id"`
+	HasChildren bool   `json:"has_children"`
+	FileURL     string `json:"file_url"`
+	JPEGURL     string `json:"jpeg_url"`
+	PNGURL      string `json:"png_url"`
+	SampleURL   string `json:"sample_url"`
+	Tags        string `json:"tags"`
 }
 
 func (p yandePost) bestImageURL() string {
@@ -543,19 +775,78 @@ type twitterAuthor struct {
 
 type twitterMedia struct {
 	Photos []twitterMediaItem `json:"photos"`
+	Videos []twitterMediaItem `json:"videos"`
+	All    []twitterMediaItem `json:"all"`
 }
 
 type twitterMediaItem struct {
-	URL string `json:"url"`
+	Type         string `json:"type"`
+	URL          string `json:"url"`
+	Format       string `json:"format,omitempty"`
+	ThumbnailURL string `json:"thumbnail_url,omitempty"`
 }
 
 func (t *twitterTweet) photoURLs() []string {
-	if t == nil || t.Media == nil || len(t.Media.Photos) == 0 {
+	if t == nil || t.Media == nil {
 		return nil
 	}
-	out := make([]string, 0, len(t.Media.Photos))
-	seen := make(map[string]struct{}, len(t.Media.Photos))
-	for _, item := range t.Media.Photos {
+	items := make([]twitterMediaItem, 0, len(t.Media.Photos)+len(t.Media.All))
+	items = append(items, t.Media.Photos...)
+	items = append(items, t.Media.All...)
+
+	return collectTwitterMediaURLs(items, func(item twitterMediaItem) bool {
+		mediaType := strings.ToLower(strings.TrimSpace(item.Type))
+		return mediaType == "" || mediaType == "photo"
+	})
+}
+
+func (t *twitterTweet) motionMedia() []twitterMediaItem {
+	if t == nil || t.Media == nil {
+		return nil
+	}
+	items := make([]twitterMediaItem, 0, len(t.Media.Videos)+len(t.Media.All))
+	items = append(items, t.Media.Videos...)
+	items = append(items, t.Media.All...)
+
+	out := make([]twitterMediaItem, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if !isTwitterMotionType(item.Type, item.Format, item.URL) {
+			continue
+		}
+		u := strings.TrimSpace(item.URL)
+		if u == "" {
+			continue
+		}
+		if _, ok := seen[u]; ok {
+			continue
+		}
+		seen[u] = struct{}{}
+		item.URL = u
+		out = append(out, item)
+	}
+	return out
+}
+
+func (m twitterMediaItem) isAnimation() bool {
+	mediaType := strings.ToLower(strings.TrimSpace(m.Type))
+	if mediaType == "gif" || mediaType == "animated_gif" {
+		return true
+	}
+	format := strings.ToLower(strings.TrimSpace(m.Format))
+	return strings.Contains(format, "gif")
+}
+
+func collectTwitterMediaURLs(items []twitterMediaItem, allow func(twitterMediaItem) bool) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if allow != nil && !allow(item) {
+			continue
+		}
 		u := strings.TrimSpace(item.URL)
 		if u == "" {
 			continue
@@ -567,6 +858,68 @@ func (t *twitterTweet) photoURLs() []string {
 		out = append(out, u)
 	}
 	return out
+}
+
+func isTwitterMotionType(mediaType, format, rawURL string) bool {
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	switch mediaType {
+	case "video", "gif", "animated_gif":
+		return true
+	case "photo":
+		return false
+	}
+
+	format = strings.ToLower(strings.TrimSpace(format))
+	if strings.Contains(format, "video") || strings.Contains(format, "gif") || strings.Contains(format, "mp4") || strings.Contains(format, "webm") {
+		return true
+	}
+
+	u, err := neturl.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(path.Ext(u.Path)) {
+	case ".mp4", ".mov", ".m4v", ".webm", ".gif":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildTwitterMediaFilename(tweetID string, index int, item twitterMediaItem) string {
+	ext := ""
+	raw := strings.TrimSpace(item.URL)
+	if raw != "" {
+		if u, err := neturl.Parse(raw); err == nil {
+			candidate := strings.ToLower(path.Ext(u.Path))
+			if isSupportedTwitterMediaExt(candidate) {
+				ext = candidate
+			}
+		}
+	}
+	if ext == "" {
+		format := strings.ToLower(strings.TrimSpace(item.Format))
+		switch {
+		case strings.Contains(format, "webm"):
+			ext = ".webm"
+		case strings.Contains(format, "mov"):
+			ext = ".mov"
+		case strings.Contains(format, "gif"):
+			ext = ".mp4"
+		default:
+			ext = ".mp4"
+		}
+	}
+	return fmt.Sprintf("twitter_%s_v%d%s", tweetID, index, ext)
+}
+
+func isSupportedTwitterMediaExt(ext string) bool {
+	switch ext {
+	case ".mp4", ".mov", ".m4v", ".webm", ".gif":
+		return true
+	default:
+		return false
+	}
 }
 
 func fetchTwitterTweet(ctx context.Context, domain, tweetID string) (*twitterTweet, error) {
@@ -636,7 +989,40 @@ func truncateRunes(s string, limit int) string {
 	return string(r[:limit])
 }
 
+func pixivDescriptionToText(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	text := pixivBRTagPattern.ReplaceAllString(raw, "\n")
+	text = htmlTagPattern.ReplaceAllString(text, "")
+	text = html.UnescapeString(text)
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	blank := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if blank {
+				continue
+			}
+			blank = true
+			out = append(out, "")
+			continue
+		}
+		blank = false
+		out = append(out, line)
+	}
+
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
 func extractHashTags(text string) []string {
+	text = strings.ReplaceAll(text, "\uFF03", "#")
 	matches := hashtagPattern.FindAllStringSubmatch(text, -1)
 	if len(matches) == 0 {
 		return nil
@@ -687,8 +1073,13 @@ func buildTwitterImageURL(raw string) string {
 	return u.String()
 }
 
-func fetchYandePost(ctx context.Context, id string) (*yandePost, error) {
-	endpoint := fmt.Sprintf("https://yande.re/post.json?tags=id:%s", id)
+func fetchYandePosts(ctx context.Context, tags string) ([]yandePost, error) {
+	tags = strings.TrimSpace(tags)
+	if tags == "" {
+		return nil, fmt.Errorf("yande tags is empty")
+	}
+
+	endpoint := fmt.Sprintf("https://yande.re/post.json?tags=%s", neturl.QueryEscape(tags))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -710,10 +1101,55 @@ func fetchYandePost(ctx context.Context, id string) (*yandePost, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&arr); err != nil {
 		return nil, err
 	}
+	return arr, nil
+}
+
+func fetchYandePost(ctx context.Context, id string) (*yandePost, error) {
+	arr, err := fetchYandePosts(ctx, fmt.Sprintf("id:%s", strings.TrimSpace(id)))
+	if err != nil {
+		return nil, err
+	}
 	if len(arr) == 0 {
 		return nil, fmt.Errorf("yande post not found")
 	}
 	return &arr[0], nil
+}
+
+func fetchYandeFamilyPosts(ctx context.Context, id string) ([]yandePost, error) {
+	seed, err := fetchYandePost(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	rootID := seed.ID
+	if seed.ParentID != nil && *seed.ParentID > 0 {
+		rootID = *seed.ParentID
+	}
+
+	family, err := fetchYandePosts(ctx, fmt.Sprintf("parent:%d", rootID))
+	if err != nil {
+		return []yandePost{*seed}, nil
+	}
+	if len(family) == 0 {
+		return []yandePost{*seed}, nil
+	}
+
+	merged := make(map[int]yandePost, len(family)+1)
+	for _, post := range family {
+		merged[post.ID] = post
+	}
+	if _, ok := merged[seed.ID]; !ok {
+		merged[seed.ID] = *seed
+	}
+
+	out := make([]yandePost, 0, len(merged))
+	for _, post := range merged {
+		out = append(out, post)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 
 func downloadWithHeaders(ctx context.Context, sourceURL, referer string) ([]byte, error) {
