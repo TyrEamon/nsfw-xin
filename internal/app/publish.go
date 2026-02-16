@@ -12,6 +12,12 @@ import (
 	"pixiv-tg-gallery/internal/telegram"
 )
 
+const (
+	previewCaptionRuneLimit      = 950
+	expandableQuoteRuneThreshold = 180
+	expandableQuoteLineThreshold = 4
+)
+
 type imagePublishMeta struct {
 	ID         string
 	Title      string
@@ -126,18 +132,49 @@ func buildPreviewCaption(meta imagePublishMeta) string {
 
 	parts := []string{header}
 	if meta.SourceText != "" {
-		parts = append(parts, "<blockquote>"+html.EscapeString(meta.SourceText)+"</blockquote>")
+		parts = append(parts, buildPreviewQuote(meta.SourceText))
 	}
 	tagLine := buildTagLine(meta.Tags)
 	if tagLine != "" {
-		parts = append(parts, "<blockquote>"+html.EscapeString(tagLine)+"</blockquote>")
+		parts = append(parts, buildPreviewQuote(tagLine))
 	}
 
 	caption := strings.Join(parts, "\n")
-	if utf8.RuneCountInString(caption) > 950 {
-		caption = clipRunes(caption, 950)
+	if utf8.RuneCountInString(caption) > previewCaptionRuneLimit {
+		caption = clipRunes(caption, previewCaptionRuneLimit)
 	}
 	return caption
+}
+
+func buildPreviewQuote(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+
+	escaped := html.EscapeString(text)
+	if shouldUseExpandableQuote(text) {
+		return "<blockquote expandable>" + escaped + "</blockquote>"
+	}
+	return "<blockquote>" + escaped + "</blockquote>"
+}
+
+func shouldUseExpandableQuote(text string) bool {
+	if utf8.RuneCountInString(text) >= expandableQuoteRuneThreshold {
+		return true
+	}
+
+	lineCount := 1
+	for _, r := range text {
+		if r != '\n' {
+			continue
+		}
+		lineCount++
+		if lineCount >= expandableQuoteLineThreshold {
+			return true
+		}
+	}
+	return false
 }
 
 func buildDiscussionComment(meta imagePublishMeta) string {
