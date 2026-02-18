@@ -5,7 +5,7 @@ Xin Gallery Puls is a Go-based ACG gallery backend.
 It supports ingest from:
 - Pixiv bookmarks crawler
 - Telegram direct photo/document
-- Telegram links (Pixiv / yande.re / X/Twitter)
+- Telegram links (Pixiv / yande.re / X/Twitter / FANBOX cover)
 
 It stores:
 - Preview post in **Publish Channel (A)**

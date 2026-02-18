@@ -24,14 +24,18 @@ const (
 )
 
 var (
-	urlPattern        = regexp.MustCompile(`https?://[^\s]+`)
-	pixivIDPattern    = regexp.MustCompile(`^\d+$`)
-	yandeIDPattern    = regexp.MustCompile(`^\d+$`)
-	twitterIDPattern  = regexp.MustCompile(`^\d+$`)
-	hashtagPattern    = regexp.MustCompile(`#([\p{L}\p{N}_][\p{L}\p{N}_\p{M}]*)`)
-	pixivBRTagPattern = regexp.MustCompile(`(?i)<br\s*/?>`)
-	htmlTagPattern    = regexp.MustCompile(`(?s)<[^>]+>`)
-	punctuationTrim   = ".,;:!?)]}>'\"\uFF0C\u3002\uFF01\uFF1F\u3001\uFF09\u3011\u300B"
+	urlPattern                  = regexp.MustCompile(`https?://[^\s]+`)
+	pixivIDPattern              = regexp.MustCompile(`^\d+$`)
+	yandeIDPattern              = regexp.MustCompile(`^\d+$`)
+	twitterIDPattern            = regexp.MustCompile(`^\d+$`)
+	hashtagPattern              = regexp.MustCompile(`#([\p{L}\p{N}_][\p{L}\p{N}_\p{M}]*)`)
+	pixivBRTagPattern           = regexp.MustCompile(`(?i)<br\s*/?>`)
+	htmlTagPattern              = regexp.MustCompile(`(?s)<[^>]+>`)
+	fanboxMetaPropFirstPattern  = regexp.MustCompile(`(?is)<meta[^>]*property=["']([^"']+)["'][^>]*content=["']([^"']+)["'][^>]*>`)
+	fanboxMetaValueFirstPattern = regexp.MustCompile(`(?is)<meta[^>]*content=["']([^"']+)["'][^>]*property=["']([^"']+)["'][^>]*>`)
+	fanboxCanonRelFirstPattern  = regexp.MustCompile(`(?is)<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["'][^>]*>`)
+	fanboxCanonHrefFirstPattern = regexp.MustCompile(`(?is)<link[^>]*href=["']([^"']+)["'][^>]*rel=["']canonical["'][^>]*>`)
+	punctuationTrim             = ".,;:!?)]}>'\"\uFF0C\u3002\uFF01\uFF1F\u3001\uFF09\u3011\u300B"
 )
 
 type linkType string
@@ -40,6 +44,7 @@ const (
 	linkPixiv   linkType = "pixiv"
 	linkYande   linkType = "yande"
 	linkTwitter linkType = "twitter"
+	linkFanbox  linkType = "fanbox"
 )
 
 type supportedLink struct {
@@ -118,6 +123,19 @@ func extractSupportedLinks(parts ...string) []supportedLink {
 			seen[key] = struct{}{}
 			links = append(links, supportedLink{Type: linkTwitter, ID: id, URL: canonicalTwitterURL(username, id)})
 		}
+
+		if isFanboxHost(host) {
+			id, ok := parseFanboxPostPath(segments)
+			if !ok {
+				continue
+			}
+			key := string(linkFanbox) + ":" + id
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			links = append(links, supportedLink{Type: linkFanbox, ID: id, URL: clean})
+		}
 	}
 
 	return links
@@ -126,6 +144,14 @@ func extractSupportedLinks(parts ...string) []supportedLink {
 func isTwitterHost(host string) bool {
 	host = strings.TrimSpace(strings.ToLower(host))
 	return host == "x.com" || host == "twitter.com" || host == "mobile.twitter.com"
+}
+
+func isFanboxHost(host string) bool {
+	host = strings.TrimSpace(strings.ToLower(host))
+	if host == "" {
+		return false
+	}
+	return host == "fanbox.cc" || strings.HasSuffix(host, ".fanbox.cc")
 }
 
 func parseTwitterPath(parts []string) (username, id string, ok bool) {
@@ -140,6 +166,16 @@ func parseTwitterPath(parts []string) (username, id string, ok bool) {
 		return username, id, true
 	}
 	return "", "", false
+}
+
+func parseFanboxPostPath(parts []string) (id string, ok bool) {
+	for i := 0; i+1 < len(parts); i++ {
+		if strings.ToLower(parts[i]) != "posts" || !pixivIDPattern.MatchString(parts[i+1]) {
+			continue
+		}
+		return parts[i+1], true
+	}
+	return "", false
 }
 
 func canonicalTwitterURL(username, tweetID string) string {
@@ -199,9 +235,18 @@ func (a *App) handleTGLinks(ctx context.Context, links []supportedLink) (*TGInge
 				firstID, firstTitle, firstURL = res.ID, res.Title, res.SourceURL
 			}
 			successMsgs = append(successMsgs, res.Summary)
+		case linkFanbox:
+			res, err := a.ingestFanboxFromLink(ctx, item)
+			if err != nil {
+				errorMsgs = append(errorMsgs, fmt.Sprintf("Fanbox %s failed: %v", item.ID, err))
+				continue
+			}
+			if firstID == "" && res.ID != "" {
+				firstID, firstTitle, firstURL = res.ID, res.Title, res.SourceURL
+			}
+			successMsgs = append(successMsgs, res.Summary)
 		}
 	}
-
 	if len(successMsgs) == 0 {
 		if len(errorMsgs) == 0 {
 			return nil, nil
@@ -497,6 +542,268 @@ func buildYandeOriginFilename(post yandePost) string {
 		}
 	}
 	return fmt.Sprintf("yande_%d%s", post.ID, ext)
+}
+
+func (a *App) ingestFanboxFromLink(ctx context.Context, item supportedLink) (*TGIngestResult, error) {
+	postID := strings.TrimSpace(item.ID)
+	if postID == "" {
+		return nil, fmt.Errorf("fanbox post id is empty")
+	}
+
+	imageID := fmt.Sprintf("fanbox_%s_cover", postID)
+	if blocked, err := a.DB.IsBlocked(ctx, imageID); err == nil && blocked {
+		return &TGIngestResult{ID: imageID, Title: "FANBOX/" + postID, SourceURL: item.URL, Summary: fmt.Sprintf("Fanbox %s skipped: blocked", postID)}, nil
+	}
+	if exists, _ := a.DB.Exists(ctx, imageID); exists {
+		return &TGIngestResult{ID: imageID, Title: "FANBOX/" + postID, SourceURL: item.URL, Summary: fmt.Sprintf("Fanbox %s skipped: already exists", postID)}, nil
+	}
+
+	meta, err := fetchFanboxPostMeta(ctx, item.URL)
+	if err != nil {
+		return nil, err
+	}
+
+	if strings.TrimSpace(meta.CoverURL) == "" {
+		return nil, fmt.Errorf("fanbox cover image not found")
+	}
+
+	sourceURL := strings.TrimSpace(meta.CanonicalURL)
+	if sourceURL == "" {
+		sourceURL = strings.TrimSpace(item.URL)
+	}
+
+	creatorID := normalizeFanboxCreator(meta.CreatorID)
+	if creatorID == "" {
+		creatorID = normalizeFanboxCreator(parseFanboxCreatorFromURL(sourceURL))
+	}
+	if creatorID == "" {
+		creatorID = normalizeFanboxCreator(parseFanboxCreatorFromURL(item.URL))
+	}
+
+	artistID := creatorID
+	if artistID == "" {
+		artistID = "none"
+	}
+	artistName := cleanFanboxArtistName(meta.Title)
+	if artistName == "" {
+		artistName = creatorID
+	}
+	if artistName == "" {
+		artistName = "Arts"
+	}
+
+	title := cleanFanboxTitle(meta.Title)
+	if title == "" {
+		title = "FANBOX/" + postID
+	}
+
+	imgData, err := downloadWithHeaders(ctx, meta.CoverURL, sourceURL)
+	if err != nil {
+		return nil, err
+	}
+
+	img, err := a.publishImage(ctx, imgData, imagePublishMeta{
+		ID:         imageID,
+		Title:      title,
+		ArtistName: artistName,
+		ArtistID:   artistID,
+		SourceURL:  sourceURL,
+		Source:     "fanbox",
+		CreatedAt:  time.Now().Unix(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &TGIngestResult{
+		ID:        img.ID,
+		Title:     img.Title,
+		SourceURL: img.SourceURL,
+		Summary:   fmt.Sprintf("Fanbox %s ingested (+1)", postID),
+	}, nil
+}
+
+type fanboxPostMeta struct {
+	Title        string
+	CanonicalURL string
+	CoverURL     string
+	CreatorID    string
+}
+
+func fetchFanboxPostMeta(ctx context.Context, postURL string) (*fanboxPostMeta, error) {
+	postURL = strings.TrimSpace(postURL)
+	if postURL == "" {
+		return nil, fmt.Errorf("fanbox post url is empty")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, postURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fanbox status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	htmlDoc := string(body)
+
+	canonicalURL := extractFanboxCanonicalURL(htmlDoc)
+	if canonicalURL == "" {
+		canonicalURL = postURL
+	}
+
+	creatorID := parseFanboxCreatorFromURL(canonicalURL)
+	if creatorID == "" {
+		creatorID = parseFanboxCreatorFromURL(postURL)
+	}
+
+	return &fanboxPostMeta{
+		Title:        extractFanboxOpenGraphMeta(htmlDoc, "og:title"),
+		CanonicalURL: canonicalURL,
+		CoverURL:     extractFanboxOpenGraphMeta(htmlDoc, "og:image"),
+		CreatorID:    creatorID,
+	}, nil
+}
+
+func extractFanboxOpenGraphMeta(htmlDoc, key string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "" {
+		return ""
+	}
+
+	for _, m := range fanboxMetaPropFirstPattern.FindAllStringSubmatch(htmlDoc, -1) {
+		if len(m) < 3 {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(m[1])) != key {
+			continue
+		}
+		return strings.TrimSpace(html.UnescapeString(m[2]))
+	}
+	for _, m := range fanboxMetaValueFirstPattern.FindAllStringSubmatch(htmlDoc, -1) {
+		if len(m) < 3 {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(m[2])) != key {
+			continue
+		}
+		return strings.TrimSpace(html.UnescapeString(m[1]))
+	}
+	return ""
+}
+
+func extractFanboxCanonicalURL(htmlDoc string) string {
+	if m := fanboxCanonRelFirstPattern.FindStringSubmatch(htmlDoc); len(m) >= 2 {
+		return strings.TrimSpace(html.UnescapeString(m[1]))
+	}
+	if m := fanboxCanonHrefFirstPattern.FindStringSubmatch(htmlDoc); len(m) >= 2 {
+		return strings.TrimSpace(html.UnescapeString(m[1]))
+	}
+	return ""
+}
+
+func parseFanboxCreatorFromURL(raw string) string {
+	u, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	host = strings.TrimPrefix(host, "www.")
+	if strings.HasSuffix(host, ".fanbox.cc") && host != "fanbox.cc" {
+		return normalizeFanboxCreator(strings.TrimSuffix(host, ".fanbox.cc"))
+	}
+
+	segments := strings.Split(strings.Trim(u.Path, "/"), "/")
+	for i := 0; i < len(segments); i++ {
+		if strings.EqualFold(segments[i], "posts") && i > 0 {
+			return normalizeFanboxCreator(segments[i-1])
+		}
+	}
+	if len(segments) > 0 {
+		return normalizeFanboxCreator(segments[0])
+	}
+	return ""
+}
+
+func normalizeFanboxCreator(raw string) string {
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, "@"))
+	if raw == "" {
+		return ""
+	}
+	raw = strings.ToLower(raw)
+
+	if strings.Contains(raw, ".") {
+		raw = strings.Split(raw, ".")[0]
+	}
+	if strings.Contains(raw, "/") {
+		raw = strings.Split(raw, "/")[0]
+	}
+
+	var b strings.Builder
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	out := strings.Trim(b.String(), "-_")
+	if out == "" || out == "fanbox" || out == "www" {
+		return ""
+	}
+	return out
+}
+
+func cleanFanboxTitle(raw string) string {
+	parts := splitFanboxTitleParts(raw)
+	if len(parts) == 0 {
+		return ""
+	}
+	return truncateRunes(parts[0], 120)
+}
+
+func cleanFanboxArtistName(raw string) string {
+	parts := splitFanboxTitleParts(raw)
+	if len(parts) < 2 {
+		return ""
+	}
+	for _, part := range parts[1:] {
+		lower := strings.ToLower(part)
+		if strings.Contains(lower, "fanbox") {
+			continue
+		}
+		return truncateRunes(part, 80)
+	}
+	return ""
+}
+
+func splitFanboxTitleParts(raw string) []string {
+	raw = strings.TrimSpace(html.UnescapeString(raw))
+	if raw == "" {
+		return nil
+	}
+	normalized := strings.ReplaceAll(raw, "|", "\uFF5C")
+	chunks := strings.Split(normalized, "\uFF5C")
+	out := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		part := strings.TrimSpace(chunk)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
 }
 
 func (a *App) ingestTwitterFromLink(ctx context.Context, item supportedLink) (*TGIngestResult, error) {

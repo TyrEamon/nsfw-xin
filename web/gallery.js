@@ -215,6 +215,9 @@
     if (source === 'twitter') {
       return 'https://x.com/' + artistId.replace(/^@+/, '');
     }
+    if (source === 'fanbox') {
+      return 'https://' + artistId.replace(/^@+/, '') + '.fanbox.cc';
+    }
 
     return 'https://www.pixiv.net/users/' + artistId;
   }
