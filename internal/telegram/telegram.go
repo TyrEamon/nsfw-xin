@@ -595,4 +595,8 @@ func (c *Client) Start(ctx context.Context) {
 	c.Bot.Start(ctx)
 }
 
+func (c *Client) StartWebhook(ctx context.Context) {
+	c.Bot.StartWebhook(ctx)
+}
+
 func (c *Client) Stop() {}

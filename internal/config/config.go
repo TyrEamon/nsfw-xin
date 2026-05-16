@@ -9,6 +9,9 @@ import (
 
 type Config struct {
 	BotToken                 string
+	BotMode                  string
+	TGWebhookSecret          string
+	TGWebhookURL             string
 	ChannelID                int64
 	PublishChannelID         int64
 	StorageChannelID         int64
@@ -59,6 +62,9 @@ type Config struct {
 func Load() *Config {
 	cfg := &Config{
 		BotToken:                 os.Getenv("BOT_TOKEN"),
+		BotMode:                  strings.ToLower(getEnvString("BOT_MODE", "polling")),
+		TGWebhookSecret:          os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
+		TGWebhookURL:             strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_URL")),
 		AdminPassword:            os.Getenv("ADMIN_PASSWORD"),
 		BotUsername:              strings.TrimPrefix(getEnvString("BOT_USERNAME", ""), "@"),
 		OriginLinkSecret:         os.Getenv("ORIGIN_LINK_SECRET"),
@@ -172,6 +178,14 @@ func (c *Config) IsTGUserAllowed(userID int64) bool {
 	}
 	_, ok := c.TGAllowedUserIDs[userID]
 	return ok
+}
+
+func (c *Config) IsTelegramWebhookMode() bool {
+	return strings.EqualFold(c.BotMode, "webhook")
+}
+
+func (c *Config) IsTelegramPollingMode() bool {
+	return c.BotMode == "" || strings.EqualFold(c.BotMode, "polling")
 }
 
 func parseIDSet(raw string) map[int64]struct{} {
