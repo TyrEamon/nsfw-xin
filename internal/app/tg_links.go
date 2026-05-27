@@ -28,6 +28,7 @@ var (
 	pixivIDPattern              = regexp.MustCompile(`^\d+$`)
 	yandeIDPattern              = regexp.MustCompile(`^\d+$`)
 	twitterIDPattern            = regexp.MustCompile(`^\d+$`)
+	pinterestIDPattern          = regexp.MustCompile(`^\d+$`)
 	hashtagPattern              = regexp.MustCompile(`#([\p{L}\p{N}_][\p{L}\p{N}_\p{M}]*)`)
 	pixivBRTagPattern           = regexp.MustCompile(`(?i)<br\s*/?>`)
 	htmlTagPattern              = regexp.MustCompile(`(?s)<[^>]+>`)
@@ -41,10 +42,11 @@ var (
 type linkType string
 
 const (
-	linkPixiv   linkType = "pixiv"
-	linkYande   linkType = "yande"
-	linkTwitter linkType = "twitter"
-	linkFanbox  linkType = "fanbox"
+	linkPixiv     linkType = "pixiv"
+	linkYande     linkType = "yande"
+	linkTwitter   linkType = "twitter"
+	linkFanbox    linkType = "fanbox"
+	linkPinterest linkType = "pinterest"
 )
 
 type supportedLink struct {
@@ -136,6 +138,32 @@ func extractSupportedLinks(parts ...string) []supportedLink {
 			seen[key] = struct{}{}
 			links = append(links, supportedLink{Type: linkFanbox, ID: id, URL: clean})
 		}
+
+		if host == "pin.it" {
+			id := strings.Trim(pathVal, "/")
+			if id == "" {
+				id = clean
+			}
+			key := string(linkPinterest) + ":" + clean
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			links = append(links, supportedLink{Type: linkPinterest, ID: id, URL: clean})
+		}
+
+		if isPinterestHost(host) {
+			id, ok := parsePinterestPath(segments)
+			if !ok {
+				continue
+			}
+			key := string(linkPinterest) + ":" + id
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			links = append(links, supportedLink{Type: linkPinterest, ID: id, URL: clean})
+		}
 	}
 
 	return links
@@ -152,6 +180,11 @@ func isFanboxHost(host string) bool {
 		return false
 	}
 	return host == "fanbox.cc" || strings.HasSuffix(host, ".fanbox.cc")
+}
+
+func isPinterestHost(host string) bool {
+	host = strings.TrimSpace(strings.ToLower(host))
+	return host == "pinterest.com" || strings.HasSuffix(host, ".pinterest.com")
 }
 
 func parseTwitterPath(parts []string) (username, id string, ok bool) {
@@ -174,6 +207,15 @@ func parseFanboxPostPath(parts []string) (id string, ok bool) {
 			continue
 		}
 		return parts[i+1], true
+	}
+	return "", false
+}
+
+func parsePinterestPath(parts []string) (id string, ok bool) {
+	for i := 0; i+1 < len(parts); i++ {
+		if parts[i] == "pin" && pinterestIDPattern.MatchString(parts[i+1]) {
+			return parts[i+1], true
+		}
 	}
 	return "", false
 }
@@ -239,6 +281,16 @@ func (a *App) handleTGLinks(ctx context.Context, links []supportedLink) (*TGInge
 			res, err := a.ingestFanboxFromLink(ctx, item)
 			if err != nil {
 				errorMsgs = append(errorMsgs, fmt.Sprintf("Fanbox %s failed: %v", item.ID, err))
+				continue
+			}
+			if firstID == "" && res.ID != "" {
+				firstID, firstTitle, firstURL = res.ID, res.Title, res.SourceURL
+			}
+			successMsgs = append(successMsgs, res.Summary)
+		case linkPinterest:
+			res, err := a.ingestPinterestFromLink(ctx, item)
+			if err != nil {
+				errorMsgs = append(errorMsgs, fmt.Sprintf("Pinterest %s failed: %v", item.ID, err))
 				continue
 			}
 			if firstID == "" && res.ID != "" {

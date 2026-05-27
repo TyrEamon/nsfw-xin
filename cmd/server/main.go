@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -164,6 +165,16 @@ func main() {
 			log.Println("telegram webhook mode enabled; TELEGRAM_WEBHOOK_URL not set, configure setWebhook manually")
 		}
 	} else {
+		if cfg.DeleteWebhookOnPolling {
+			webhookCtx, cancelWebhook := context.WithTimeout(context.Background(), 15*time.Second)
+			err := deleteTelegramWebhookBeforePolling(webhookCtx, tg, cfg.BotToken)
+			cancelWebhook()
+			if err != nil {
+				log.Printf("warning: delete telegram webhook before polling failed: %v; polling may still hit getUpdates conflict", err)
+			} else {
+				log.Println("telegram webhook deleted before polling")
+			}
+		}
 		go tg.Start(ctx)
 	}
 
@@ -174,4 +185,38 @@ func main() {
 	_ = httpSrv.Shutdown(shutdownCtx)
 	tg.Stop()
 	log.Println("shutdown complete")
+}
+
+func deleteTelegramWebhookBeforePolling(ctx context.Context, tg *telegram.Client, token string) error {
+	if _, err := tg.Bot.DeleteWebhook(ctx, &bot.DeleteWebhookParams{
+		DropPendingUpdates: false,
+	}); err == nil {
+		return nil
+	} else {
+		log.Printf("telegram deleteWebhook via bot client failed, retrying direct HTTP: %v", err)
+		if fallbackErr := deleteTelegramWebhookDirect(ctx, token); fallbackErr != nil {
+			return fmt.Errorf("bot client: %v; direct HTTP: %w", err, fallbackErr)
+		}
+	}
+	return nil
+}
+
+func deleteTelegramWebhookDirect(ctx context.Context, token string) error {
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/deleteWebhook?drop_pending_updates=false", strings.TrimSpace(token))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("telegram status %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	return nil
 }

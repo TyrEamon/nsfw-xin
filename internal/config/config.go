@@ -12,6 +12,7 @@ type Config struct {
 	BotMode                  string
 	TGWebhookSecret          string
 	TGWebhookURL             string
+	DeleteWebhookOnPolling   bool
 	ChannelID                int64
 	PublishChannelID         int64
 	StorageChannelID         int64
@@ -65,6 +66,7 @@ func Load() *Config {
 		BotMode:                  strings.ToLower(getEnvString("BOT_MODE", "polling")),
 		TGWebhookSecret:          os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
 		TGWebhookURL:             strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_URL")),
+		DeleteWebhookOnPolling:   getEnvBool("TELEGRAM_DELETE_WEBHOOK_ON_POLLING", false),
 		AdminPassword:            os.Getenv("ADMIN_PASSWORD"),
 		BotUsername:              strings.TrimPrefix(getEnvString("BOT_USERNAME", ""), "@"),
 		OriginLinkSecret:         os.Getenv("ORIGIN_LINK_SECRET"),

@@ -5,7 +5,7 @@ Xin Gallery Puls is a Go-based ACG gallery backend.
 It supports ingest from:
 - Pixiv bookmarks crawler
 - Telegram direct photo/document
-- Telegram links (Pixiv / yande.re / X/Twitter / FANBOX cover)
+- Telegram links (Pixiv / yande.re / X/Twitter / FANBOX cover / Pinterest)
 
 It stores:
 - Preview post in **Publish Channel (A)**
@@ -33,6 +33,12 @@ Twitter link ingest caption style:
 - Header: `title(source_url) / artist`
 - Blockquote 1: tweet text
 - Blockquote 2: hashtags (if any)
+
+Pinterest link ingest:
+- Supports `pin.it` short links and `pinterest.com/pin/...` links.
+- Image pins are published like normal gallery images and written to D1.
+- Video/GIF pins are published to the Telegram channel as motion media and are not written to the image gallery.
+- Image extraction prefers `i.pinimg.com/originals` and tries `.jpg`, `.jpeg`, `.png`, `.webp` before falling back to `1200x`, `736x`, and `564x`.
 
 ---
 
@@ -63,6 +69,14 @@ Twitter link ingest caption style:
 
 ### Optional / compatibility
 
+- `BOT_MODE` (`polling` or `webhook`, default `polling`)
+- `TELEGRAM_DELETE_WEBHOOK_ON_POLLING` (`true/false`, default `false`)
+  - Set to `true` when moving from webhook hosting back to polling, so startup deletes Telegram's old webhook before `getUpdates`.
+  - It keeps pending updates (`drop_pending_updates=false`).
+- `TELEGRAM_WEBHOOK_URL`
+  - Used only when `BOT_MODE=webhook`; if set, the app calls `setWebhook` on startup.
+- `TELEGRAM_WEBHOOK_SECRET`
+  - Required when `BOT_MODE=webhook`.
 - `CHANNEL_ID`
   - backward compatibility fallback
   - if `PUBLISH_CHANNEL_ID` or `STORAGE_CHANNEL_ID` is empty, fallback to `CHANNEL_ID`
@@ -216,5 +230,6 @@ Admin APIs:
 - Random image API returns preview only by design.
 - `/image/{file_id}` is long-cache friendly (`max-age=31536000, immutable`).
 - Keep only one bot instance to avoid Telegram `getUpdates 409 conflict`.
+- If moving from Render/webhook to Zeabur/polling, use `BOT_MODE=polling` and temporarily set `TELEGRAM_DELETE_WEBHOOK_ON_POLLING=true`.
 - Twitter author crawler uses RSS source + existing Twitter single-link ingest flow; state key format: `twitter_author_last_<username>`.
 - If token/password leaked, rotate immediately.

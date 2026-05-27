@@ -241,7 +241,7 @@ func buildDiscussionComment(meta imagePublishMeta) string {
 
 func shouldShowSourceLine(source string) bool {
 	switch strings.ToLower(strings.TrimSpace(source)) {
-	case "pixiv", "twitter", "yande":
+	case "pixiv", "twitter", "yande", "pinterest":
 		return true
 	default:
 		return false
